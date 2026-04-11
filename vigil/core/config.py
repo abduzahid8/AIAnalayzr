@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+DEFAULT_CORS_ALLOWED_ORIGINS = (
+    "http://localhost",
+    "http://127.0.0.1",
+)
+DEFAULT_CORS_ALLOW_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
 
 class Settings(BaseSettings):
@@ -15,18 +21,70 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # ── LLM inference ────────────────────────────────────────
     aiml_api_key: str = ""
     aiml_base_url: str = "https://api.aimlapi.com/v1"
     aiml_model: str = "gpt-4o"
 
+    # ── Market data ──────────────────────────────────────────
     alpha_vantage_api_key: str = ""
     fred_api_key: str = ""
 
-    redis_url: str = "redis://localhost:6379/0"
+    # ── External intelligence sources ────────────────────────
+    newsapi_key: str = ""
+    reddit_enabled: bool = True
+    edgar_enabled: bool = True
 
+    # ── Infrastructure ───────────────────────────────────────
+    redis_url: str = "redis://localhost:6379/0"
+    public_api_base_url: str = ""
+    cors_allowed_origins: str = ",".join(DEFAULT_CORS_ALLOWED_ORIGINS)
+    cors_allow_origin_regex: str = DEFAULT_CORS_ALLOW_ORIGIN_REGEX
+
+    # ── Server ───────────────────────────────────────────────
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"
+    reload: bool = False
+
+    # ── Pipeline feature flags ───────────────────────────────
+    agent_verification: bool = True
+    debate_layer: bool = True
+    history_ttl_days: int = 90
+    vigil_tier: str = "pro"  # "free" | "pro"
+
+    def get_public_api_base_url(self) -> str:
+        return self.public_api_base_url.strip().rstrip("/")
+
+    def get_cors_allowed_origins(self) -> list[str]:
+        raw_value = self.cors_allowed_origins.strip()
+        if not raw_value:
+            return list(DEFAULT_CORS_ALLOWED_ORIGINS)
+
+        if raw_value.startswith("["):
+            try:
+                parsed = json.loads(raw_value)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                origins = [
+                    str(origin).strip().rstrip("/")
+                    for origin in parsed
+                    if str(origin).strip()
+                ]
+                if origins:
+                    return origins
+
+        origins = [
+            origin.strip().rstrip("/")
+            for origin in raw_value.split(",")
+            if origin.strip()
+        ]
+        return origins or list(DEFAULT_CORS_ALLOWED_ORIGINS)
+
+    def get_cors_allow_origin_regex(self) -> str | None:
+        value = self.cors_allow_origin_regex.strip()
+        return value or None
 
 
 settings = Settings()

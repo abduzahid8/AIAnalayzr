@@ -1,0 +1,5 @@
+{
+  "appId": "com.yourcompany.vigil",
+  "appName": "Vigil",
+  "webDir": "../static"
+}

@@ -2,17 +2,21 @@
 
 FastAPI entry point and DAG Orchestrator.
 
-Pipeline topology:
-    Tier 1  (parallel)   : SignalHarvester, NarrativeIntel, MacroWatchdog, CompetitiveIntel
-    Tier 2  (sequential) : MarketOracle → RiskSynthesizer
-    Tier 3  (executive)  : StrategyCommander
-    Post-run             : CorrelationEngine (metadata enrichment)
+Enhanced pipeline topology:
+    Pre-flight            : DataAggregator (parallel fetch of all external sources)
+    Tier 1  (parallel)    : SignalHarvester, NarrativeIntel, MacroWatchdog, CompetitiveIntel
+    Debate                : Inter-Agent Debate Protocol
+    Tier 2  (sequential)  : MarketOracle -> RiskSynthesizer
+    Validation            : Output Validator
+    Tier 3  (executive)   : StrategyCommander
+    Post-run              : CorrelationEngine, Fingerprint, History, Anomaly Detection
 """
 
 from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -20,8 +24,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -36,7 +40,12 @@ from vigil.agents import (
     signal_harvester,
     strategy_commander,
 )
+from vigil.agents.debate import run_debate
+from vigil.agents.validator import run_validation
+from vigil.core.anomaly import detect_anomalies
 from vigil.core.config import settings
+from vigil.core.fingerprint import lookup_fingerprint, store_analysis_fingerprint
+from vigil.core.history import store_analysis
 from vigil.core.state import (
     ChatMessage,
     CompanyProfile,
@@ -44,8 +53,10 @@ from vigil.core.state import (
     VigilState,
     delete_state,
     load_state,
+    ping_redis,
     save_state,
 )
+from vigil.services.data_aggregator import DataBundle, fetch_all_data
 from vigil.services.llm import llm_complete
 
 logging.basicConfig(
@@ -59,16 +70,24 @@ logger = logging.getLogger("vigil.orchestrator")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Vigil platform starting – DAG Orchestrator online")
+    logger.info("Vigil platform starting – DAG Orchestrator online (v3.0)")
     yield
     logger.info("Vigil platform shutting down")
 
 
 app = FastAPI(
     title="Vigil – Risk Intelligence Platform",
-    version="2.0.0",
-    description="8-agent DAG pipeline with conversational advisor, risk themes, and 30-day playbook.",
+    version="3.0.0",
+    description="Multi-step agent pipeline with real data feeds, inter-agent debate, validation layer, and adaptive scoring.",
     lifespan=lifespan,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.get_cors_allowed_origins(),
+    allow_origin_regex=settings.get_cors_allow_origin_regex(),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -105,6 +124,12 @@ class RiskThemeResponse(BaseModel):
     source_agents: list[str]
 
 
+class AnomalyFlagResponse(BaseModel):
+    flag_id: str
+    description: str
+    severity: str
+
+
 class SignalFeedItemResponse(BaseModel):
     label: str
     delta: str
@@ -125,11 +150,18 @@ class AnalysisResponse(BaseModel):
     planning_window: str
     market_mode: str
     risk_themes: list[RiskThemeResponse]
+    anomaly_flags: list[AnomalyFlagResponse]
     strategic_actions: list[dict[str, Any]]
     signal_feed: list[SignalFeedItemResponse]
     agent_correlations: dict[str, float]
     divergence_index: float
     pipeline_duration_seconds: float
+    data_quality: str
+    data_sources: list[str]
+    debate_consensus: float | None = None
+    validation_valid: bool | None = None
+    fingerprint_hash: str | None = None
+    historical_avg_score: float | None = None
 
 
 class SessionStatusResponse(BaseModel):
@@ -158,10 +190,11 @@ async def _run_agent_safe(
     agent_fn,
     state: VigilState,
     agent_name: str,
+    data_bundle: DataBundle | None = None,
 ) -> VigilState:
     """Execute a single agent with error isolation."""
     try:
-        return await agent_fn(state)
+        return await agent_fn(state, data_bundle)
     except Exception as exc:
         logger.error("Agent %s FAILED: %s", agent_name, exc, exc_info=True)
         state.errors.append(f"{agent_name}: {exc!s}")
@@ -169,19 +202,35 @@ async def _run_agent_safe(
 
 
 async def run_pipeline(state: VigilState) -> VigilState:
-    """Execute the full 3-tier DAG pipeline."""
+    """Execute the full enhanced DAG pipeline."""
     t0 = time.monotonic()
 
-    # ── Tier 1: Parallel execution of 4 intelligence agents ──────
+    # ── Pre-flight: Fetch all external data in parallel ──────
+    state.stage = PipelineStage.DATA_FETCH
+    await save_state(state)
+    logger.info(">> Pre-flight – fetching all external data sources")
+
+    bundle = await fetch_all_data(state.company)
+    state.data_quality = bundle.data_quality
+    state.data_sources = bundle.sources_available
+    logger.info(
+        ">> Data assembled: quality=%s, sources=%d",
+        bundle.data_quality, len(bundle.sources_available),
+    )
+
+    # ── Fingerprint lookup ───────────────────────────────────
+    state.fingerprint = await lookup_fingerprint(state.company)
+
+    # ── Tier 1: Parallel multi-step agents ───────────────────
     state.stage = PipelineStage.TIER1_RUNNING
     await save_state(state)
-    logger.info("▶ Tier 1 – launching 4 agents in parallel")
+    logger.info(">> Tier 1 – launching 4 multi-step agents in parallel")
 
     s1, s2, s3, s4 = await asyncio.gather(
-        _run_agent_safe(signal_harvester.run, copy.deepcopy(state), "SignalHarvester"),
-        _run_agent_safe(narrative_intel.run, copy.deepcopy(state), "NarrativeIntel"),
-        _run_agent_safe(macro_watchdog.run, copy.deepcopy(state), "MacroWatchdog"),
-        _run_agent_safe(competitive_intel.run, copy.deepcopy(state), "CompetitiveIntel"),
+        _run_agent_safe(signal_harvester.run, copy.deepcopy(state), "SignalHarvester", bundle),
+        _run_agent_safe(narrative_intel.run, copy.deepcopy(state), "NarrativeIntel", bundle),
+        _run_agent_safe(macro_watchdog.run, copy.deepcopy(state), "MacroWatchdog", bundle),
+        _run_agent_safe(competitive_intel.run, copy.deepcopy(state), "CompetitiveIntel", bundle),
     )
 
     state.signal_harvester = s1.signal_harvester
@@ -192,31 +241,74 @@ async def run_pipeline(state: VigilState) -> VigilState:
 
     state.stage = PipelineStage.TIER1_DONE
     await save_state(state)
-    logger.info("✓ Tier 1 complete (%.1fs)", time.monotonic() - t0)
+    logger.info(">> Tier 1 complete (%.1fs)", time.monotonic() - t0)
 
-    # ── Tier 2: Sequential analysis → scoring ────────────────────
+    # ── Debate: Inter-agent cross-validation ─────────────────
+    state.stage = PipelineStage.DEBATE_RUNNING
+    await save_state(state)
+    logger.info(">> Debate – cross-validating Tier-1 outputs")
+
+    state = await run_debate(state)
+
+    state.stage = PipelineStage.DEBATE_DONE
+    await save_state(state)
+    logger.info(">> Debate complete (%.1fs)", time.monotonic() - t0)
+
+    # ── Tier 2: Sequential synthesis → scoring ───────────────
     state.stage = PipelineStage.TIER2_RUNNING
     await save_state(state)
-    logger.info("▶ Tier 2 – MarketOracle → RiskSynthesizer")
+    logger.info(">> Tier 2 – MarketOracle -> RiskSynthesizer")
 
-    state = await _run_agent_safe(market_oracle.run, state, "MarketOracle")
-    state = await _run_agent_safe(risk_synthesizer.run, state, "RiskSynthesizer")
+    state = await _run_agent_safe(market_oracle.run, state, "MarketOracle", bundle)
+    state = await _run_agent_safe(risk_synthesizer.run, state, "RiskSynthesizer", bundle)
 
     state.stage = PipelineStage.TIER2_DONE
     await save_state(state)
-    logger.info("✓ Tier 2 complete (%.1fs)", time.monotonic() - t0)
+    logger.info(">> Tier 2 complete (%.1fs)", time.monotonic() - t0)
 
-    # ── Tier 3: Executive output ─────────────────────────────────
+    # ── Anomaly detection ────────────────────────────────────
+    if state.risk_synthesizer:
+        vix = state.macro_watchdog.vix_level if state.macro_watchdog else None
+        anomalies = await detect_anomalies(
+            risk_score=state.risk_synthesizer.final_score,
+            sector=state.company.sector,
+            geography=state.company.geography,
+            vix_level=vix,
+            entropy_factor=state.risk_synthesizer.entropy_factor,
+        )
+        state.risk_synthesizer.anomaly_flags.extend(anomalies)
+
+    # ── Validation: Quality assurance layer ───────────────────
+    state.stage = PipelineStage.VALIDATION_RUNNING
+    await save_state(state)
+    logger.info(">> Validation – checking output quality")
+
+    state = await run_validation(state, bundle)
+
+    state.stage = PipelineStage.VALIDATION_DONE
+    await save_state(state)
+    logger.info(">> Validation complete (%.1fs)", time.monotonic() - t0)
+
+    # ── Tier 3: Executive output ─────────────────────────────
     state.stage = PipelineStage.TIER3_RUNNING
     await save_state(state)
-    logger.info("▶ Tier 3 – StrategyCommander")
+    logger.info(">> Tier 3 – StrategyCommander")
 
-    state = await _run_agent_safe(strategy_commander.run, state, "StrategyCommander")
+    state = await _run_agent_safe(strategy_commander.run, state, "StrategyCommander", bundle)
 
     state.stage = PipelineStage.COMPLETE
     await save_state(state)
     elapsed = time.monotonic() - t0
-    logger.info("✓ Pipeline COMPLETE in %.1fs", elapsed)
+    logger.info(">> Pipeline COMPLETE in %.1fs", elapsed)
+
+    # ── Post-run: Store history and fingerprint ──────────────
+    if state.risk_synthesizer:
+        await store_analysis_fingerprint(
+            state.company,
+            state.risk_synthesizer.final_score,
+            state.risk_synthesizer.risk_tier.value,
+        )
+        await store_analysis(state)
 
     return state
 
@@ -262,6 +354,7 @@ def _build_chat_context(state: VigilState) -> str:
         f"Risk Tier: {risk.risk_tier.value if risk else 'N/A'}",
         f"Market Regime: {oracle.market_regime if oracle else 'N/A'}",
         f"Forward Outlook: {oracle.forward_outlook if oracle else 'N/A'}",
+        f"Data Quality: {state.data_quality}",
         "",
         f"Executive Summary: {strat.executive_summary if strat else 'N/A'}",
     ]
@@ -269,12 +362,20 @@ def _build_chat_context(state: VigilState) -> str:
     if risk and risk.risk_themes:
         sections.append("\nTop Risk Themes:")
         for t in risk.risk_themes[:5]:
-            sections.append(f"  - {t.name}: {t.severity:.0f}% — {t.description}")
+            sections.append(f"  - {t.name}: {t.severity:.0f}% -- {t.description}")
+
+    if risk and risk.anomaly_flags:
+        sections.append("\nAnomaly Flags:")
+        for a in risk.anomaly_flags[:3]:
+            sections.append(f"  - [{a.severity}] {a.description}")
 
     if strat and strat.actions:
         sections.append("\nPlaybook Actions:")
         for a in strat.actions:
             sections.append(f"  - [{a.priority}] {a.title} (by {a.deadline})")
+
+    if state.fingerprint and state.fingerprint.historical_avg_score is not None:
+        sections.append(f"\nHistorical Context: Similar companies avg score: {state.fingerprint.historical_avg_score:.1f}")
 
     return "\n".join(sections)
 
@@ -283,7 +384,7 @@ def _build_chat_context(state: VigilState) -> str:
 
 @app.post("/analyse", response_model=AnalysisResponse, tags=["Analysis"])
 async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
-    """Run the full 8-agent risk analysis pipeline for a company."""
+    """Run the full enhanced risk analysis pipeline for a company."""
     state = VigilState(
         company=CompanyProfile(
             name=req.company_name,
@@ -343,6 +444,17 @@ async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
             for t in risk.risk_themes
         ]
 
+    anomaly_flags_resp = []
+    if risk and risk.anomaly_flags:
+        anomaly_flags_resp = [
+            AnomalyFlagResponse(
+                flag_id=a.flag_id,
+                description=a.description,
+                severity=a.severity,
+            )
+            for a in risk.anomaly_flags
+        ]
+
     signal_feed_resp = []
     if strat and strat.signal_feed:
         signal_feed_resp = [
@@ -366,6 +478,7 @@ async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
         planning_window=strat.planning_window if strat else "",
         market_mode=strat.market_mode if strat else "",
         risk_themes=risk_themes_resp,
+        anomaly_flags=anomaly_flags_resp,
         strategic_actions=[
             a.model_dump() for a in (strat.actions if strat else [])
         ],
@@ -373,6 +486,24 @@ async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
         agent_correlations=correlations,
         divergence_index=divergence,
         pipeline_duration_seconds=round(elapsed, 2),
+        data_quality=state.data_quality,
+        data_sources=state.data_sources,
+        debate_consensus=(
+            state.debate_result.consensus_score
+            if state.debate_result else None
+        ),
+        validation_valid=(
+            state.validation_result.is_valid
+            if state.validation_result else None
+        ),
+        fingerprint_hash=(
+            state.fingerprint.fingerprint_hash
+            if state.fingerprint else None
+        ),
+        historical_avg_score=(
+            state.fingerprint.historical_avg_score
+            if state.fingerprint else None
+        ),
     )
 
 
@@ -442,7 +573,35 @@ async def purge_session(session_id: str) -> dict:
 
 @app.get("/health", tags=["Ops"])
 async def health_check() -> dict:
-    return {"status": "ok", "service": "vigil", "version": "2.0.0"}
+    redis_ok = await ping_redis()
+    overall_status = "ok" if redis_ok else "degraded"
+    return {
+        "status": overall_status,
+        "service": "vigil",
+        "version": "3.0.0",
+        "checks": {
+            "redis": "ok" if redis_ok else "down",
+            "llm_key_present": bool(settings.aiml_api_key),
+            "public_api_base_url_set": bool(settings.get_public_api_base_url()),
+        },
+        "features": {
+            "debate_layer": settings.debate_layer,
+            "agent_verification": settings.agent_verification,
+            "tier": settings.vigil_tier,
+        },
+    }
+
+
+@app.get("/app-config.js", include_in_schema=False)
+async def serve_app_config():
+    payload = {
+        "API_BASE_URL": settings.get_public_api_base_url(),
+        "APP_PLATFORM": "web",
+    }
+    return Response(
+        content=f"window.VIGIL_APP_CONFIG = {json.dumps(payload, indent=2)};\n",
+        media_type="application/javascript",
+    )
 
 
 @app.get("/", include_in_schema=False)
@@ -460,5 +619,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level,
-        reload=True,
+        reload=settings.reload,
     )

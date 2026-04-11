@@ -1,1 +1,2 @@
-"""Core domain models, scoring engine, and configuration."""
+"""Core domain models, adaptive scoring engine, configuration,
+fingerprinting, anomaly detection, and historical learning."""

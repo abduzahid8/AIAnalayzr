@@ -30,10 +30,15 @@ class RiskTier(str, Enum):
 
 class PipelineStage(str, Enum):
     INIT = "INIT"
+    DATA_FETCH = "DATA_FETCH"
     TIER1_RUNNING = "TIER1_RUNNING"
     TIER1_DONE = "TIER1_DONE"
+    DEBATE_RUNNING = "DEBATE_RUNNING"
+    DEBATE_DONE = "DEBATE_DONE"
     TIER2_RUNNING = "TIER2_RUNNING"
     TIER2_DONE = "TIER2_DONE"
+    VALIDATION_RUNNING = "VALIDATION_RUNNING"
+    VALIDATION_DONE = "VALIDATION_DONE"
     TIER3_RUNNING = "TIER3_RUNNING"
     COMPLETE = "COMPLETE"
     FAILED = "FAILED"
@@ -63,11 +68,20 @@ class CompanyProfile(BaseModel):
     risk_tolerance: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
+class AgentConfidence(BaseModel):
+    """Attached to every agent output after verification step."""
+    score: float = Field(default=0.7, ge=0.0, le=1.0)
+    data_quality: str = "partial"  # "rich" | "moderate" | "partial" | "sparse"
+    reasoning: str = ""
+    verification_notes: str = ""
+
+
 class SignalHarvesterOutput(BaseModel):
     price_signals: list[dict[str, Any]] = Field(default_factory=list)
     volume_anomalies: list[str] = Field(default_factory=list)
     technical_summary: str = ""
     signal_score: float = Field(default=50.0, ge=0, le=100)
+    confidence: AgentConfidence = Field(default_factory=AgentConfidence)
 
 
 class NarrativeIntelOutput(BaseModel):
@@ -75,6 +89,7 @@ class NarrativeIntelOutput(BaseModel):
     key_narratives: list[str] = Field(default_factory=list)
     media_volume: str = "normal"
     controversy_flags: list[str] = Field(default_factory=list)
+    confidence: AgentConfidence = Field(default_factory=AgentConfidence)
 
 
 class MacroWatchdogOutput(BaseModel):
@@ -83,6 +98,7 @@ class MacroWatchdogOutput(BaseModel):
     interest_rate_outlook: str = "stable"
     macro_risk_score: float = Field(default=50.0, ge=0, le=100)
     key_indicators: dict[str, Any] = Field(default_factory=dict)
+    confidence: AgentConfidence = Field(default_factory=AgentConfidence)
 
 
 class CompetitiveIntelOutput(BaseModel):
@@ -90,6 +106,7 @@ class CompetitiveIntelOutput(BaseModel):
     competitor_threats: list[str] = Field(default_factory=list)
     market_share_trend: str = "stable"
     competitive_score: float = Field(default=50.0, ge=0, le=100)
+    confidence: AgentConfidence = Field(default_factory=AgentConfidence)
 
 
 class MarketOracleOutput(BaseModel):
@@ -97,16 +114,25 @@ class MarketOracleOutput(BaseModel):
     correlation_matrix: dict[str, float] = Field(default_factory=dict)
     forward_outlook: str = ""
     composite_market_score: float = Field(default=50.0, ge=0, le=100)
+    confidence: AgentConfidence = Field(default_factory=AgentConfidence)
 
 
 class RiskTheme(BaseModel):
-    """A named risk theme surfaced by the pipeline (e.g. 'MiCA Compliance Squeeze')."""
+    """A named risk theme surfaced by the pipeline."""
     theme_id: str
     name: str
     severity: float = Field(default=50.0, ge=0, le=100)
     category: str = "operational"
     description: str = ""
     source_agents: list[str] = Field(default_factory=list)
+
+
+class AnomalyFlag(BaseModel):
+    """Statistical anomaly detected during scoring."""
+    flag_id: str
+    description: str
+    severity: str = "medium"  # "low" | "medium" | "high"
+    source: str = ""
 
 
 class RiskSynthesizerOutput(BaseModel):
@@ -117,6 +143,9 @@ class RiskSynthesizerOutput(BaseModel):
     risk_tier: RiskTier = RiskTier.YELLOW
     scoring_breakdown: dict[str, float] = Field(default_factory=dict)
     risk_themes: list[RiskTheme] = Field(default_factory=list)
+    anomaly_flags: list[AnomalyFlag] = Field(default_factory=list)
+    sector_weight_profile: str = ""
+    confidence: AgentConfidence = Field(default_factory=AgentConfidence)
 
 
 class StrategicAction(BaseModel):
@@ -142,6 +171,28 @@ class StrategyCommanderOutput(BaseModel):
     playbook_horizon_days: int = 30
     signal_feed: list[SignalFeedItem] = Field(default_factory=list)
     market_mode: str = ""
+    confidence: AgentConfidence = Field(default_factory=AgentConfidence)
+
+
+# ── Debate & Validation outputs ──────────────────────────────────────
+
+class DebateResult(BaseModel):
+    """Output of the inter-agent debate protocol."""
+    resolved_contradictions: list[dict[str, str]] = Field(default_factory=list)
+    signal_hierarchy: list[str] = Field(default_factory=list)
+    consensus_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    dominant_signal: str = ""
+    debate_summary: str = ""
+
+
+class ValidationResult(BaseModel):
+    """Output of the post-synthesis validation layer."""
+    is_valid: bool = True
+    tier_override: RiskTier | None = None
+    score_adjustment: float = 0.0
+    grounding_issues: list[str] = Field(default_factory=list)
+    logic_issues: list[str] = Field(default_factory=list)
+    validation_summary: str = ""
 
 
 class ChatMessage(BaseModel):
@@ -150,6 +201,17 @@ class ChatMessage(BaseModel):
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+
+
+# ── Company Fingerprint ──────────────────────────────────────────────
+
+class RiskFingerprint(BaseModel):
+    """Unique risk DNA for cross-session comparison."""
+    fingerprint_hash: str = ""
+    similar_company_count: int = 0
+    historical_avg_score: float | None = None
+    historical_score_range: tuple[float, float] | None = None
+    sector_baseline: float | None = None
 
 
 # ── The Global Blackboard ────────────────────────────────────────────
@@ -163,6 +225,7 @@ class VigilState(BaseModel):
 
     company: CompanyProfile = Field(default_factory=lambda: CompanyProfile(name=""))
 
+    # Agent outputs
     signal_harvester: SignalHarvesterOutput | None = None
     narrative_intel: NarrativeIntelOutput | None = None
     macro_watchdog: MacroWatchdogOutput | None = None
@@ -170,6 +233,17 @@ class VigilState(BaseModel):
     market_oracle: MarketOracleOutput | None = None
     risk_synthesizer: RiskSynthesizerOutput | None = None
     strategy_commander: StrategyCommanderOutput | None = None
+
+    # Verification layer outputs
+    debate_result: DebateResult | None = None
+    validation_result: ValidationResult | None = None
+
+    # Cross-session intelligence
+    fingerprint: RiskFingerprint | None = None
+
+    # Metadata
+    data_quality: str = "sparse"
+    data_sources: list[str] = Field(default_factory=list)
 
     chat_history: list[ChatMessage] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
@@ -187,6 +261,15 @@ async def _get_redis() -> aioredis.Redis:
             settings.redis_url, decode_responses=True
         )
     return _pool
+
+
+async def ping_redis() -> bool:
+    r = await _get_redis()
+    try:
+        pong = await r.ping()
+    except Exception:
+        return False
+    return bool(pong)
 
 
 def _key(session_id: str) -> str:

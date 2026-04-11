@@ -2,3 +2,11 @@
 __pycache__/
 *.pyc
 .DS_Store
+client/node_modules/
+client/.expo/
+client/dist/
+mobile/node_modules/
+
+# Proprietary prompts – keep private in production deployments
+# Uncomment the line below to prevent prompts from being committed:
+# prompts/*.txt

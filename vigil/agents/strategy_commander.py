@@ -1,8 +1,7 @@
-"""Agent 7 – StrategyCommander (Tier 3 – Executive)
+"""Agent 7 – StrategyCommander (Tier 3 – Multi-Step Executive)
 
-Consumes the full blackboard state and produces a 30-day strategic
-playbook with concrete actions, an executive headline, a planning window,
-signal feed items, and market mode classification.
+Consumes the full blackboard state including debate results, validation
+output, and fingerprint data to produce a 30-day strategic playbook.
 """
 
 from __future__ import annotations
@@ -10,8 +9,10 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from vigil.core.state import (
+    AgentConfidence,
     SignalFeedItem,
     StrategicAction,
     StrategyCommanderOutput,
@@ -24,30 +25,37 @@ logger = logging.getLogger("vigil.agents.strategy_commander")
 SYSTEM_PROMPT = """\
 <role>StrategyCommander – Executive Strategy Officer</role>
 <mission>
-You are the final agent in the Vigil pipeline.  You receive the full
-intelligence picture – signals, narratives, macro, competitive analysis,
-market regime, risk themes, and the computed risk score.  Your job is to
-produce a complete executive output package.
+You are the final agent in the Vigil pipeline.  You receive the COMPLETE
+intelligence picture: real data signals, agent analyses with confidence
+scores, debate results, validation output, risk themes, anomaly flags,
+and the computed risk score.
+
+Your job is to produce a complete executive output package that is
+GROUNDED in this intelligence, not generic advice.
+
+If risk themes mention specific regulatory threats, your actions must
+address those specific threats.  If anomaly flags were raised, address
+them explicitly.  If the validation layer overrode a tier, explain why.
 </mission>
 <output_format>
 Return ONLY valid JSON matching this schema:
 {{
-  "executive_summary": "2-4 sentence C-suite briefing",
+  "executive_summary": "2-4 sentence C-suite briefing referencing specific risks",
   "executive_headline": "Single line: '[Company] faces [X]% risk exposure — planning window open for ~[N] days before conditions reset.'",
   "planning_window": "e.g. '~45 days' or '2-3 weeks'",
   "market_mode": "RISK-ON" | "RISK-OFF" | "TRANSITIONAL" | "SELECTIVE DEPLOY" | "CRISIS",
   "actions": [
     {{
       "action_id": 1,
-      "title": "short action title",
-      "description": "detailed action description with rationale",
+      "title": "short action title addressing a specific risk theme",
+      "description": "detailed action with rationale tied to real data",
       "deadline": "YYYY-MM-DDTHH:MM:SSZ",
       "priority": "CRITICAL" | "HIGH" | "MEDIUM"
     }}
   ],
   "signal_feed": [
     {{
-      "label": "Short signal headline",
+      "label": "Short signal headline from real data",
       "delta": "+2.3%" or "-1.5%" or "stable",
       "sentiment": "positive" | "negative" | "neutral" | "warning"
     }}
@@ -56,9 +64,9 @@ Return ONLY valid JSON matching this schema:
 </output_format>
 <constraints>
 - Generate 3-5 actions.  Each deadline MUST be ISO-8601 and within the next 30 days.
-- Actions must be specific and actionable, not generic advice.
-- Prioritise by risk-adjusted impact.
-- Generate 4-6 signal feed items representing key market/sector indicators.
+- Actions must address SPECIFIC risk themes identified in the analysis.
+- Each action should reference which risk theme it mitigates.
+- Generate 4-6 signal feed items from REAL data indicators.
 - executive_headline must reference the company name, risk score, and timing.
 - market_mode should reflect the current market posture for this company.
 </constraints>
@@ -85,6 +93,7 @@ def _build_briefing_context(state: VigilState) -> str:
         f"Risk Tier: {risk.risk_tier.value if risk else 'N/A'}",
         f"Confidence Interval: {risk.confidence_interval if risk else 'N/A'}",
         f"Entropy Factor: {risk.entropy_factor if risk else 'N/A'}",
+        f"Sector Weight Profile: {risk.sector_weight_profile if risk else 'N/A'}",
         "",
         "=== Scoring Breakdown ===",
         json.dumps(risk.scoring_breakdown if risk else {}, indent=2),
@@ -93,7 +102,42 @@ def _build_briefing_context(state: VigilState) -> str:
     if risk and risk.risk_themes:
         sections.append("\n=== Risk Themes ===")
         for t in risk.risk_themes:
-            sections.append(f"  [{t.severity:.0f}%] {t.name}: {t.description}")
+            sections.append(f"  [{t.severity:.0f}%] {t.name} ({t.category}): {t.description}")
+
+    if risk and risk.anomaly_flags:
+        sections.append("\n=== Anomaly Flags ===")
+        for a in risk.anomaly_flags:
+            sections.append(f"  [{a.severity}] {a.description}")
+
+    # Debate results
+    if state.debate_result:
+        sections.extend([
+            "",
+            "=== Inter-Agent Debate ===",
+            f"Consensus: {state.debate_result.consensus_score:.2f}",
+            f"Dominant Signal: {state.debate_result.dominant_signal}",
+            f"Summary: {state.debate_result.debate_summary}",
+        ])
+
+    # Validation results
+    if state.validation_result:
+        sections.extend([
+            "",
+            "=== Validation Layer ===",
+            f"Valid: {state.validation_result.is_valid}",
+            f"Tier Override: {state.validation_result.tier_override or 'None'}",
+            f"Summary: {state.validation_result.validation_summary}",
+        ])
+
+    # Fingerprint
+    if state.fingerprint and state.fingerprint.historical_avg_score is not None:
+        sections.extend([
+            "",
+            "=== Historical Context ===",
+            f"Similar Companies Analyzed: {state.fingerprint.similar_company_count}",
+            f"Historical Avg Score: {state.fingerprint.historical_avg_score:.1f}",
+            f"Sector Baseline: {state.fingerprint.sector_baseline or 'N/A'}",
+        ])
 
     sections.extend([
         "",
@@ -106,6 +150,12 @@ def _build_briefing_context(state: VigilState) -> str:
             f"Outlook: {state.market_oracle.forward_outlook}"
             if state.market_oracle else ""
         ),
+        "",
+        "=== Agent Confidence Summary ===",
+        f"  SignalHarvester: {state.signal_harvester.confidence.score:.2f}" if state.signal_harvester else "  SignalHarvester: N/A",
+        f"  NarrativeIntel:  {state.narrative_intel.confidence.score:.2f}" if state.narrative_intel else "  NarrativeIntel: N/A",
+        f"  MacroWatchdog:   {state.macro_watchdog.confidence.score:.2f}" if state.macro_watchdog else "  MacroWatchdog: N/A",
+        f"  CompetitiveIntel:{state.competitive_intel.confidence.score:.2f}" if state.competitive_intel else "  CompetitiveIntel: N/A",
         "",
         "=== Signal Harvester ===",
         (
@@ -141,16 +191,24 @@ def _build_briefing_context(state: VigilState) -> str:
     return "\n".join(sections)
 
 
-async def run(state: VigilState) -> VigilState:
+async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
     now = datetime.now(timezone.utc)
     context = _build_briefing_context(state)
+
+    data_summary_str = ""
+    if data_bundle is not None:
+        data_summary_str = (
+            f"\n=== Real Data Summary ===\n"
+            f"{json.dumps(data_bundle.to_summary(), indent=2, default=str)}\n"
+        )
 
     user_msg = (
         f"Today's date: {now.strftime('%Y-%m-%d')}\n"
         f"Playbook window: {now.strftime('%Y-%m-%d')} to "
         f"{(now + timedelta(days=30)).strftime('%Y-%m-%d')}\n\n"
-        f"{context}\n\n"
-        "Produce the full executive output: headline, summary, actions, signal feed, and market mode."
+        f"{context}\n"
+        f"{data_summary_str}\n"
+        "Produce the full executive output: headline, summary, actions tied to specific risk themes, signal feed, and market mode."
     )
 
     data = await llm_json(SYSTEM_PROMPT, user_msg, max_tokens=4000)
@@ -193,6 +251,10 @@ async def run(state: VigilState) -> VigilState:
         playbook_horizon_days=data.get("playbook_horizon_days", 30),
         signal_feed=signal_feed,
         market_mode=data.get("market_mode", "TRANSITIONAL"),
+        confidence=AgentConfidence(
+            score=0.8,
+            data_quality=data_bundle.data_quality if data_bundle else "sparse",
+        ),
     )
 
     logger.info(

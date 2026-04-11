@@ -3,10 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#070b14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no">
 <title>Vigil — Risk Intelligence Platform</title>
+<script src="/app-config.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
+  --safe-top:env(safe-area-inset-top,0px);--safe-right:env(safe-area-inset-right,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);--safe-left:env(safe-area-inset-left,0px);
   --bg:#070b14;--surface:#0d1321;--surface2:#151d2e;--surface3:#1a2438;
   --border:#1e2d42;--border-active:#2a4060;
   --text:#e2e8f0;--text2:#8896ab;--text3:#5a6a80;
@@ -15,7 +22,7 @@
   --radius:10px;--shadow:0 4px 24px rgba(0,0,0,.5);
 }
 html{font-family:'Inter','SF Pro Display',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;font-size:14px}
-body{min-height:100vh}
+body{min-height:100vh;padding-bottom:var(--safe-bottom)}
 a{color:var(--accent);text-decoration:none}
 button{cursor:pointer;font-family:inherit}
 input,textarea,select{font-family:inherit}
@@ -24,7 +31,7 @@ input,textarea,select{font-family:inherit}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 
 /* ── Topbar ─────────────────────────────────────────────── */
-.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:100}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:calc(12px + var(--safe-top)) calc(24px + var(--safe-right)) 12px calc(24px + var(--safe-left));display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:100}
 .topbar .logo{font-size:18px;font-weight:800;letter-spacing:-.5px;color:var(--accent)}
 .topbar .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
@@ -34,7 +41,7 @@ input,textarea,select{font-family:inherit}
 .topbar .right{margin-left:auto;display:flex;align-items:center;gap:12px}
 
 /* ── Onboarding ─────────────────────────────────────────── */
-#onboarding{min-height:calc(100vh - 50px);display:flex;flex-direction:column;align-items:center;padding:40px 24px}
+#onboarding{min-height:calc(100vh - 50px);display:flex;flex-direction:column;align-items:center;padding:40px calc(24px + var(--safe-right)) calc(40px + var(--safe-bottom)) calc(24px + var(--safe-left))}
 #onboarding .headline{text-align:center;margin-bottom:32px}
 #onboarding .headline h2{font-size:28px;font-weight:800;letter-spacing:-.5px;margin-bottom:8px}
 #onboarding .headline p{color:var(--text2);font-size:14px}
@@ -273,7 +280,7 @@ input,textarea,select{font-family:inherit}
 .tier-RED{background:rgba(239,68,68,.15);color:var(--red)}
 .tier-CRITICAL{background:rgba(220,38,38,.2);color:var(--critical)}
 
-.footer{padding:16px;text-align:center;font-size:11px;color:var(--text3);border-top:1px solid var(--border)}
+.footer{padding:16px calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));text-align:center;font-size:11px;color:var(--text3);border-top:1px solid var(--border)}
 </style>
 </head>
 <body>
@@ -689,6 +696,55 @@ input,textarea,select{font-family:inherit}
 
 <script>
 const TIER_COLORS = {GREEN:'#22c55e',YELLOW:'#eab308',ORANGE:'#f97316',RED:'#ef4444',CRITICAL:'#dc2626'};
+const APP_CONFIG = window.VIGIL_APP_CONFIG || {};
+
+function normalizeBaseUrl(baseUrl) {
+  return (baseUrl || '').trim().replace(/\/+$/, '');
+}
+
+function getStoredApiBaseUrl() {
+  try {
+    return normalizeBaseUrl(window.localStorage.getItem('VIGIL_API_BASE_URL') || '');
+  } catch (_) {
+    return '';
+  }
+}
+
+function storeApiBaseUrl(baseUrl) {
+  try {
+    if (baseUrl) {
+      window.localStorage.setItem('VIGIL_API_BASE_URL', baseUrl);
+      return;
+    }
+    window.localStorage.removeItem('VIGIL_API_BASE_URL');
+  } catch (_) {}
+}
+
+function resolveApiBaseUrl() {
+  const queryBaseUrl = normalizeBaseUrl(new URLSearchParams(window.location.search).get('apiBaseUrl'));
+  if (queryBaseUrl) {
+    storeApiBaseUrl(queryBaseUrl);
+    return queryBaseUrl;
+  }
+
+  const configuredBaseUrl = normalizeBaseUrl(APP_CONFIG.API_BASE_URL || getStoredApiBaseUrl());
+  if (configuredBaseUrl) return configuredBaseUrl;
+
+  if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+    return normalizeBaseUrl(window.location.origin);
+  }
+
+  return '';
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
+
+function apiUrl(path) {
+  if (!API_BASE_URL) {
+    throw new Error('API base URL is not configured. Set window.VIGIL_APP_CONFIG.API_BASE_URL in /app-config.js before packaging the iOS build.');
+  }
+  return `${API_BASE_URL}${path}`;
+}
 
 /* ── State ── */
 let sessionId = null;
@@ -732,7 +788,13 @@ function updatePreview() {
   risks.slice(0, 3).forEach(r => { tagsEl.innerHTML += `<span class="preview-tag info">${r}</span>`; });
 
   const alertEl = document.getElementById('previewAlert');
-  if (regs.length > 0 && sector) {
+  document.getElementById('submitBtn').disabled = !API_BASE_URL;
+  document.getElementById('previewStatus').textContent = API_BASE_URL ? 'Active' : 'API setup required';
+
+  if (!API_BASE_URL) {
+    alertEl.style.display = 'block';
+    alertEl.innerHTML = '<strong>Hosted API required.</strong> Set <code>window.VIGIL_APP_CONFIG.API_BASE_URL</code> in <code>/app-config.js</code> before packaging the iOS app.';
+  } else if (regs.length > 0 && sector) {
     alertEl.style.display = 'block';
     alertEl.innerHTML = `<strong>${name}</strong> faces elevated exposure to <strong>${regs[0]}</strong> enforcement given current market conditions — awaiting full agent analysis.`;
   } else {
@@ -803,7 +865,7 @@ function showLoading() {
 function hideLoading() {
   clearInterval(animInterval);
   loading.classList.remove('active');
-  document.getElementById('submitBtn').disabled = false;
+  document.getElementById('submitBtn').disabled = !API_BASE_URL;
 }
 
 /* ── Tab switching ── */
@@ -1090,7 +1152,7 @@ form.addEventListener('submit', async (e) => {
   };
 
   try {
-    const res = await fetch('/analyse', {
+    const res = await fetch(apiUrl('/analyse'), {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify(body),
@@ -1103,7 +1165,7 @@ form.addEventListener('submit', async (e) => {
     sessionId = data.session_id;
 
     try {
-      const full = await fetch(`/session/${data.session_id}/full`);
+      const full = await fetch(apiUrl(`/session/${data.session_id}/full`));
       if (full.ok) { data._raw = await full.json(); }
     } catch(_) {}
 
@@ -1137,7 +1199,7 @@ async function sendChat() {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 
   try {
-    const res = await fetch('/chat', {
+    const res = await fetch(apiUrl('/chat'), {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({session_id: sessionId, message: msg}),
