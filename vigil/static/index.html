@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vigil — Risk Intelligence Platform</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#070b14;--surface:#0d1321;--surface2:#151d2e;--surface3:#1a2438;
+  --border:#1e2d42;--border-active:#2a4060;
+  --text:#e2e8f0;--text2:#8896ab;--text3:#5a6a80;
+  --accent:#00e5a0;--accent2:#00c98b;--accent-dim:rgba(0,229,160,.1);
+  --green:#22c55e;--yellow:#eab308;--orange:#f97316;--red:#ef4444;--critical:#dc2626;
+  --radius:10px;--shadow:0 4px 24px rgba(0,0,0,.5);
+}
+html{font-family:'Inter','SF Pro Display',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;font-size:14px}
+body{min-height:100vh}
+a{color:var(--accent);text-decoration:none}
+button{cursor:pointer;font-family:inherit}
+input,textarea,select{font-family:inherit}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--surface)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* ── Topbar ─────────────────────────────────────────────── */
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:100}
+.topbar .logo{font-size:18px;font-weight:800;letter-spacing:-.5px;color:var(--accent)}
+.topbar .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.topbar .nav{display:flex;gap:4px;margin-left:24px}
+.topbar .nav-item{padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;transition:all .2s;text-transform:uppercase;letter-spacing:.5px}
+.topbar .nav-item:hover,.topbar .nav-item.active{color:var(--accent);background:var(--accent-dim)}
+.topbar .right{margin-left:auto;display:flex;align-items:center;gap:12px}
+
+/* ── Onboarding ─────────────────────────────────────────── */
+#onboarding{min-height:calc(100vh - 50px);display:flex;flex-direction:column;align-items:center;padding:40px 24px}
+#onboarding .headline{text-align:center;margin-bottom:32px}
+#onboarding .headline h2{font-size:28px;font-weight:800;letter-spacing:-.5px;margin-bottom:8px}
+#onboarding .headline p{color:var(--text2);font-size:14px}
+#onboarding .privacy-badges{display:flex;gap:12px;justify-content:center;margin-bottom:32px}
+.privacy-badge{display:flex;align-items:center;gap:6px;padding:6px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;font-size:11px;color:var(--text2)}
+.privacy-badge .ico{color:var(--accent);font-size:14px}
+
+/* ── Onboarding layout ──────────────────────────────────── */
+.onboard-layout{display:grid;grid-template-columns:1fr 340px;gap:28px;max-width:1100px;width:100%;align-items:start}
+@media(max-width:900px){.onboard-layout{grid-template-columns:1fr}}
+
+/* ── Form cards ─────────────────────────────────────────── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;box-shadow:var(--shadow)}
+.card-title{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--accent);font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.card-title .num{background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:11px;color:var(--text2);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.form-group label .req{color:var(--orange)}
+.form-group input,.form-group textarea,.form-group select{
+  width:100%;padding:9px 12px;background:var(--surface2);border:1px solid var(--border);
+  border-radius:6px;color:var(--text);font-size:13px;transition:border .2s}
+.form-group input:focus,.form-group textarea:focus,.form-group select:focus{outline:none;border-color:var(--accent)}
+.form-group textarea{resize:vertical;min-height:60px}
+.form-group select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238896ab' d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+.form-group .hint{font-size:10px;color:var(--text3);margin-top:3px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+
+/* ── Chips ──────────────────────────────────────────────── */
+.chip-group{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.chip{padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid var(--border);color:var(--text2);cursor:pointer;transition:all .2s;user-select:none}
+.chip:hover{border-color:var(--accent);color:var(--accent)}
+.chip.active{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+
+/* ── Range slider ───────────────────────────────────────── */
+.slider-row{display:flex;align-items:center;gap:12px;margin-top:8px}
+.slider-row input[type=range]{flex:1;-webkit-appearance:none;height:4px;border-radius:2px;background:var(--border);outline:none}
+.slider-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--accent);cursor:pointer}
+.slider-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:4px}
+
+/* ── Progress bar ───────────────────────────────────────── */
+.progress-section{margin-bottom:20px}
+.progress-header{display:flex;justify-content:space-between;margin-bottom:6px}
+.progress-header span{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text2)}
+.progress-header .pct{color:var(--accent);font-weight:700}
+.progress-bar{height:4px;background:var(--surface2);border-radius:2px;overflow:hidden}
+.progress-bar .fill{height:100%;background:var(--accent);border-radius:2px;transition:width .4s}
+
+/* ── Live Preview ───────────────────────────────────────── */
+.preview-card{position:sticky;top:70px}
+.preview-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.preview-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.preview-status{font-size:10px;padding:3px 10px;border-radius:10px;font-weight:700}
+.preview-status.active{background:rgba(0,229,160,.15);color:var(--accent)}
+.preview-company{font-size:18px;font-weight:800;margin-bottom:4px}
+.preview-meta{font-size:11px;color:var(--text2);margin-bottom:12px}
+.preview-tags{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px}
+.preview-tag{padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600}
+.preview-tag.warn{background:rgba(249,115,22,.15);color:var(--orange)}
+.preview-tag.info{background:rgba(0,229,160,.1);color:var(--accent)}
+.preview-alert{background:var(--surface2);border-radius:6px;padding:10px;font-size:12px;line-height:1.5;color:var(--text2);border-left:3px solid var(--orange);margin-bottom:12px}
+.preview-alert strong{color:var(--orange)}
+.preview-completeness{margin-top:12px}
+.preview-completeness .bar-bg{height:4px;background:var(--surface2);border-radius:2px;overflow:hidden;margin-top:6px}
+.preview-completeness .bar-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .4s}
+
+/* ── Submit ─────────────────────────────────────────────── */
+.btn-primary{
+  width:100%;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:700;
+  background:var(--accent);color:var(--bg);transition:all .2s;text-transform:uppercase;letter-spacing:.5px;margin-top:16px}
+.btn-primary:hover{background:var(--accent2)}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── Loading overlay ────────────────────────────────────── */
+.loading-overlay{display:none;position:fixed;inset:0;background:rgba(7,11,20,.92);z-index:200;flex-direction:column;align-items:center;justify-content:center;gap:20px}
+.loading-overlay.active{display:flex}
+.spinner{width:48px;height:48px;border:3px solid var(--surface2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-stage{font-size:16px;font-weight:700;color:var(--text)}
+.loading-text{font-size:13px;color:var(--text2);text-align:center}
+.pipeline-steps{display:flex;gap:6px;margin-top:6px}
+.pipeline-step{width:36px;height:3px;border-radius:2px;background:var(--surface2);transition:background .4s}
+.pipeline-step.done{background:var(--accent)}
+.pipeline-step.active{background:var(--accent);animation:pulse 1s infinite}
+
+/* ──────────────────────────────────────────────────────────
+   DASHBOARD
+   ────────────────────────────────────────────────────────── */
+#dashboard{display:none}
+#dashboard.visible{display:block}
+
+/* ── Headline bar ───────────────────────────────────────── */
+.headline-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 24px;font-size:13px;color:var(--text2);display:flex;align-items:center;gap:8px;overflow-x:auto;white-space:nowrap}
+.headline-bar .score-pill{font-weight:700;padding:2px 10px;border-radius:4px;font-size:12px}
+.headline-bar .text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+
+/* ── Risk chips strip ───────────────────────────────────── */
+.risk-strip{display:flex;gap:8px;padding:12px 24px;overflow-x:auto;background:var(--bg);border-bottom:1px solid var(--border)}
+.risk-chip{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:all .2s}
+.risk-chip:hover{border-color:var(--accent)}
+.risk-chip .rc-name{font-size:12px;font-weight:600}
+.risk-chip .rc-score{font-size:14px;font-weight:800}
+.risk-chip .rc-bar{width:60px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden}
+.risk-chip .rc-bar-fill{height:100%;border-radius:2px;transition:width .6s}
+
+/* ── Action chips (playbook quick actions) ──────────────── */
+.action-strip{display:flex;gap:8px;padding:8px 24px;overflow-x:auto;background:var(--bg)}
+.action-chip{flex-shrink:0;display:flex;align-items:center;gap:6px;padding:6px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:11px;font-weight:600;color:var(--text2)}
+.action-chip .ac-dot{width:6px;height:6px;border-radius:50%}
+.action-chip .ac-date{color:var(--text3);font-weight:400}
+
+/* ── Dashboard layout ───────────────────────────────────── */
+.dash-layout{display:grid;grid-template-columns:220px 1fr 280px;gap:0;min-height:calc(100vh - 180px)}
+@media(max-width:1100px){.dash-layout{grid-template-columns:1fr;}.side-left,.side-right{display:none}}
+
+/* ── Tab bar ────────────────────────────────────────────── */
+.tab-bar{display:flex;gap:2px;padding:12px 20px 0;background:var(--surface);border-bottom:1px solid var(--border)}
+.tab-btn{padding:8px 16px;font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;border:none;background:none;border-bottom:2px solid transparent;transition:all .2s;text-transform:uppercase;letter-spacing:.3px}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* ── Side panels ────────────────────────────────────────── */
+.side-left{background:var(--surface);border-right:1px solid var(--border);padding:16px;overflow-y:auto}
+.side-right{background:var(--surface);border-left:1px solid var(--border);padding:16px;overflow-y:auto}
+
+.side-section{margin-bottom:20px}
+.side-section-title{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:700;margin-bottom:10px}
+
+/* Signal feed items */
+.signal-item{padding:8px;border-radius:6px;margin-bottom:6px;background:var(--surface2);border:1px solid transparent;transition:border-color .2s}
+.signal-item:hover{border-color:var(--border)}
+.signal-item .si-label{font-size:12px;font-weight:600;margin-bottom:2px}
+.signal-item .si-delta{font-size:13px;font-weight:800}
+.signal-item .si-delta.pos{color:var(--green)}
+.signal-item .si-delta.neg{color:var(--red)}
+.signal-item .si-delta.warn{color:var(--orange)}
+.signal-item .si-delta.neu{color:var(--text2)}
+
+/* Mode badge */
+.mode-badge{display:inline-block;padding:4px 12px;border-radius:4px;font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;margin-bottom:12px}
+.mode-RISK-ON{background:rgba(34,197,94,.15);color:var(--green)}
+.mode-RISK-OFF{background:rgba(239,68,68,.15);color:var(--red)}
+.mode-TRANSITIONAL{background:rgba(234,179,8,.15);color:var(--yellow)}
+.mode-SELECTIVE{background:rgba(0,229,160,.15);color:var(--accent)}
+.mode-CRISIS{background:rgba(220,38,38,.2);color:var(--critical)}
+
+/* ── Right panel snapshot ───────────────────────────────── */
+.snap-company{font-size:16px;font-weight:800;margin-bottom:4px}
+.snap-meta{font-size:11px;color:var(--text2);margin-bottom:12px}
+.snap-score-ring{text-align:center;margin:12px 0}
+.snap-score-ring .score-num{font-size:36px;font-weight:800}
+.snap-score-ring .score-sub{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.snap-metric{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
+.snap-metric .label{color:var(--text2)}
+.snap-metric .val{font-weight:700}
+.snap-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:10px}
+
+/* ── Center content ─────────────────────────────────────── */
+.center-panel{display:flex;flex-direction:column;overflow-y:auto;background:var(--bg)}
+.tab-content{display:none;padding:20px;flex:1}
+.tab-content.active{display:block}
+
+/* ── Chat ───────────────────────────────────────────────── */
+.chat-area{display:flex;flex-direction:column;height:100%}
+.chat-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.chat-msg{max-width:85%;padding:12px 16px;border-radius:12px;font-size:13px;line-height:1.6}
+.chat-msg.user{align-self:flex-end;background:var(--accent-dim);border:1px solid rgba(0,229,160,.2);color:var(--text);border-bottom-right-radius:4px}
+.chat-msg.assistant{align-self:flex-start;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-bottom-left-radius:4px}
+.chat-msg .msg-meta{font-size:10px;color:var(--text3);margin-top:6px;display:flex;gap:8px}
+.chat-msg .msg-meta .agents-used{font-size:9px;color:var(--text3)}
+.chat-input-row{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border);background:var(--surface)}
+.chat-input-row input{flex:1;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px}
+.chat-input-row input:focus{outline:none;border-color:var(--accent)}
+.btn-analyze{padding:10px 24px;border:none;border-radius:8px;font-size:13px;font-weight:700;background:var(--accent);color:var(--bg);text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
+.btn-analyze:hover{background:var(--accent2)}
+.btn-analyze:disabled{opacity:.4}
+
+/* ── Risk cards ─────────────────────────────────────────── */
+.risk-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.risk-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;transition:border-color .2s;border-top:3px solid var(--border)}
+.risk-card:hover{border-color:var(--accent)}
+.risk-card .rc-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.risk-card .rc-title{font-size:14px;font-weight:700}
+.risk-card .rc-sev{font-size:22px;font-weight:800}
+.risk-card .rc-cat{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin-bottom:8px}
+.risk-card .rc-desc{font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:8px}
+.risk-card .rc-agents{display:flex;gap:4px;flex-wrap:wrap}
+.risk-card .rc-agent-tag{font-size:9px;padding:2px 8px;background:var(--surface2);border-radius:4px;color:var(--text3);text-transform:uppercase}
+
+/* ── Agent cards ────────────────────────────────────────── */
+.agents-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.agents-grid{grid-template-columns:1fr}}
+.agent-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;transition:border-color .2s}
+.agent-card:hover{border-color:var(--accent)}
+.agent-card .a-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.agent-card .a-icon{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.agent-card .a-name{font-size:13px;font-weight:600}
+.agent-card .a-score{margin-left:auto;font-size:18px;font-weight:800}
+.agent-card .a-body{font-size:12px;color:var(--text2);line-height:1.5}
+.agent-card .a-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.agent-card .a-tag{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:10px;color:var(--text2)}
+
+/* ── Playbook actions ───────────────────────────────────── */
+.action-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:12px;border-left:3px solid var(--accent)}
+.action-card .ac-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.action-card .ac-num{width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--bg);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0}
+.action-card .ac-title{font-size:14px;font-weight:600;flex:1}
+.action-card .ac-priority{font-size:10px;font-weight:700;padding:3px 10px;border-radius:4px;text-transform:uppercase}
+.priority-CRITICAL{background:rgba(220,38,38,.15);color:var(--critical)}
+.priority-HIGH{background:rgba(249,115,22,.15);color:var(--orange)}
+.priority-MEDIUM{background:rgba(234,179,8,.15);color:var(--yellow)}
+.action-card .ac-desc{font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:6px}
+.action-card .ac-deadline{font-size:11px;color:var(--text3)}
+
+/* ── Correlation ────────────────────────────────────────── */
+.corr-item{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.corr-item .corr-label{font-size:11px;color:var(--text2);width:130px;flex-shrink:0;text-align:right}
+.corr-bar-bg{flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden}
+.corr-bar{height:100%;border-radius:3px;transition:width .8s}
+.corr-item .corr-val{font-size:11px;font-weight:700;width:40px}
+
+/* ── Summary ────────────────────────────────────────────── */
+.summary-box{background:var(--surface2);border-radius:8px;padding:16px;font-size:13px;line-height:1.7;border-left:3px solid var(--accent);margin-bottom:16px}
+
+/* ── Score ring (dashboard) ─────────────────────────────── */
+.score-ring{position:relative;width:160px;height:160px;margin:0 auto 16px}
+.score-ring svg{transform:rotate(-90deg)}
+.score-ring .track{fill:none;stroke:var(--surface2);stroke-width:10}
+.score-ring .fill{fill:none;stroke-width:10;stroke-linecap:round;transition:stroke-dashoffset 1.2s ease,stroke .5s}
+.score-ring .score-value{position:absolute;top:50%;left:50%;transform:translate(-50%,-55%);font-size:42px;font-weight:800;letter-spacing:-2px}
+.score-ring .score-label{position:absolute;top:50%;left:50%;transform:translate(-50%,20px);font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px}
+.tier-badge{display:inline-block;padding:4px 16px;border-radius:16px;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase}
+.tier-GREEN{background:rgba(34,197,94,.15);color:var(--green)}
+.tier-YELLOW{background:rgba(234,179,8,.15);color:var(--yellow)}
+.tier-ORANGE{background:rgba(249,115,22,.15);color:var(--orange)}
+.tier-RED{background:rgba(239,68,68,.15);color:var(--red)}
+.tier-CRITICAL{background:rgba(220,38,38,.2);color:var(--critical)}
+
+.footer{padding:16px;text-align:center;font-size:11px;color:var(--text3);border-top:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ TOPBAR ═══════════════════ -->
+<div class="topbar">
+  <div class="dot"></div>
+  <div class="logo">VIGIL</div>
+  <div class="nav" id="dashNav" style="display:none">
+    <div class="nav-item active" data-tab="narrative">Narrative</div>
+    <div class="nav-item" data-tab="risks">Risks</div>
+    <div class="nav-item" data-tab="competitive">Competitive</div>
+    <div class="nav-item" data-tab="synthesizer">Synthesizer</div>
+    <div class="nav-item" data-tab="goals">Goals</div>
+    <div class="nav-item" data-tab="commander">Commander</div>
+  </div>
+  <div class="right">
+    <span id="topbarCompany" style="font-size:12px;color:var(--text2);display:none"></span>
+  </div>
+</div>
+
+<!-- ═══════════════════ LOADING ═══════════════════ -->
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <div class="loading-stage" id="loadingStage">Initializing Pipeline...</div>
+  <div class="loading-text" id="loadingText">8 AI agents are analysing your company</div>
+  <div class="pipeline-steps">
+    <div class="pipeline-step" id="step1" title="Signal Harvester"></div>
+    <div class="pipeline-step" id="step2" title="Narrative Intel"></div>
+    <div class="pipeline-step" id="step3" title="Macro Watchdog"></div>
+    <div class="pipeline-step" id="step4" title="Competitive Intel"></div>
+    <div class="pipeline-step" id="step5" title="Market Oracle"></div>
+    <div class="pipeline-step" id="step6" title="Risk Synthesizer"></div>
+    <div class="pipeline-step" id="step7" title="Strategy Commander"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════ ONBOARDING ═══════════════════ -->
+<div id="onboarding">
+  <div class="headline">
+    <h2>Tell Vigil about your business.</h2>
+    <p>More detail leads to more specific risk intelligence.</p>
+  </div>
+  <div class="privacy-badges">
+    <div class="privacy-badge"><span class="ico">&#9679;</span> No account needed</div>
+    <div class="privacy-badge"><span class="ico">&#128274;</span> Data lives in browser session only</div>
+    <div class="privacy-badge"><span class="ico">&#9733;</span> More detail = better analysis</div>
+  </div>
+
+  <div class="onboard-layout">
+    <!-- ── Left: Form ── -->
+    <div>
+      <form id="analysisForm" autocomplete="off">
+
+        <!-- Section 1: Company Basics -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title"><span class="num">01</span> Company Basics</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Company Name <span class="req">*</span></label>
+              <input id="f_name" required placeholder="e.g. Oraxyn">
+            </div>
+            <div class="form-group">
+              <label>Website</label>
+              <input id="f_website" placeholder="e.g. oraxyn.com">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>What does your company do? <span class="req">*</span></label>
+            <textarea id="f_desc" required placeholder="SaaS startup for LLM R&D and generative AI apps"></textarea>
+            <div class="hint">Write like you'd describe it to an investor. More specific = more specific risk analysis.</div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Sector <span class="req">*</span></label>
+              <select id="f_sector" required>
+                <option value="">Select...</option>
+                <option value="Technology / AI">Technology / AI</option>
+                <option value="Fintech">Fintech</option>
+                <option value="Healthcare">Healthcare</option>
+                <option value="E-Commerce">E-Commerce</option>
+                <option value="SaaS">SaaS</option>
+                <option value="Biotech">Biotech</option>
+                <option value="Clean Energy">Clean Energy</option>
+                <option value="Automotive">Automotive</option>
+                <option value="Real Estate">Real Estate</option>
+                <option value="Consumer">Consumer</option>
+                <option value="Enterprise">Enterprise</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Sub-Sector / Niche</label>
+              <input id="f_subsector" placeholder="e.g. AI Training, DevTools, RegTech">
+            </div>
+          </div>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label>Primary Market</label>
+              <select id="f_geography">
+                <option value="Global">Global</option>
+                <option value="US">United States</option>
+                <option value="EU">European Union</option>
+                <option value="UK">United Kingdom</option>
+                <option value="Asia">Asia</option>
+                <option value="MENA">MENA</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Country <span class="req">*</span></label>
+              <select id="f_country">
+                <option value="United States">United States</option>
+                <option value="United Kingdom">United Kingdom</option>
+                <option value="Germany">Germany</option>
+                <option value="France">France</option>
+                <option value="Cyprus">Cyprus</option>
+                <option value="Singapore">Singapore</option>
+                <option value="UAE">UAE</option>
+                <option value="India">India</option>
+                <option value="Japan">Japan</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Operating In</label>
+              <input id="f_operating" placeholder="EU, UAE, ...">
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: Financial Snapshot -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title"><span class="num">02</span> Financial Snapshot</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>ARR Range</label>
+              <select id="f_arr">
+                <option value="">Select...</option>
+                <option value="Pre-revenue">Pre-revenue</option>
+                <option value="<$100K">&lt;$100K</option>
+                <option value="$100K-$500K">$100K–$500K</option>
+                <option value="$500K-$1M">$500K–$1M</option>
+                <option value="$1M-$5M">$1M–$5M</option>
+                <option value="$5M-$20M">$5M–$20M</option>
+                <option value="$20M+">$20M+</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Funding Stage</label>
+              <select id="f_funding">
+                <option value="">Select...</option>
+                <option value="Bootstrapped">Bootstrapped</option>
+                <option value="Pre-Seed">Pre-Seed</option>
+                <option value="Seed">Seed</option>
+                <option value="Series A">Series A</option>
+                <option value="Series B">Series B</option>
+                <option value="Series C+">Series C+</option>
+                <option value="Public">Public</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label>Runway</label>
+              <select id="f_runway">
+                <option value="">Select...</option>
+                <option value="<6 months">&lt;6 months</option>
+                <option value="6-12 months">6–12 months</option>
+                <option value="12-18 months">12–18 months</option>
+                <option value="18-24 months">18–24 months</option>
+                <option value="24+ months">24+ months</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Team Size</label>
+              <select id="f_team">
+                <option value="">Select...</option>
+                <option value="1-5">1–5</option>
+                <option value="6-15">6–15</option>
+                <option value="16-50">16–50</option>
+                <option value="51-200">51–200</option>
+                <option value="200+">200+</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Revenue Currency</label>
+              <select id="f_currency">
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: Risk Exposure -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title"><span class="num">03</span> Risk Exposure Areas</div>
+          <div class="form-group">
+            <label>Key Risk Exposures (select all that apply)</label>
+            <div class="chip-group" id="riskChips">
+              <div class="chip" data-val="Regulatory / Legal">Regulatory / Legal</div>
+              <div class="chip" data-val="Interest Rates">Interest Rates</div>
+              <div class="chip" data-val="Funding Market">Funding Market</div>
+              <div class="chip" data-val="Supply Chain">Supply Chain</div>
+              <div class="chip" data-val="AI / Tech Policy">AI / Tech Policy</div>
+              <div class="chip" data-val="Geopolitical">Geopolitical</div>
+              <div class="chip" data-val="Currency / FX">Currency / FX</div>
+              <div class="chip" data-val="Cyber / Data">Cyber / Data</div>
+              <div class="chip" data-val="Labor Market">Labor Market</div>
+              <div class="chip" data-val="Consumer Banking">Consumer Banking</div>
+              <div class="chip" data-val="Tariff / Trade">Tariff / Trade</div>
+              <div class="chip" data-val="Commodity Prices">Commodity Prices</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Active Regulations</label>
+            <div class="chip-group" id="regChips">
+              <div class="chip" data-val="MiCA">MiCA</div>
+              <div class="chip" data-val="DORA">DORA</div>
+              <div class="chip" data-val="GDPR">GDPR</div>
+              <div class="chip" data-val="EU AI Act">EU AI Act</div>
+              <div class="chip" data-val="SOC 2">SOC 2</div>
+              <div class="chip" data-val="HIPAA">HIPAA</div>
+              <div class="chip" data-val="SEC">SEC</div>
+              <div class="chip" data-val="PCI DSS">PCI DSS</div>
+              <div class="chip" data-val="CCPA">CCPA</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Risk Tolerance</label>
+            <div class="slider-row">
+              <input type="range" id="f_tolerance" min="0" max="100" value="50">
+            </div>
+            <div class="slider-labels">
+              <span>Very Conservative</span>
+              <span>Moderate</span>
+              <span>Growth Oriented</span>
+              <span>Aggressive</span>
+            </div>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary" id="submitBtn">Run Full Risk Analysis</button>
+      </form>
+    </div>
+
+    <!-- ── Right: Live Preview ── -->
+    <div>
+      <div class="card preview-card">
+        <div class="preview-header">
+          <span class="preview-label">Live Preview</span>
+          <span class="preview-status active" id="previewStatus">Active</span>
+        </div>
+
+        <div class="progress-section">
+          <div class="progress-header">
+            <span>Profile Completeness</span>
+            <span class="pct" id="completePct">0%</span>
+          </div>
+          <div class="progress-bar"><div class="fill" id="completeBar" style="width:0%"></div></div>
+        </div>
+
+        <div class="preview-company" id="previewName">Your Company</div>
+        <div class="preview-meta" id="previewMeta">Fill in details to see preview</div>
+        <div class="preview-tags" id="previewTags"></div>
+        <div class="preview-alert" id="previewAlert" style="display:none"></div>
+
+        <div class="preview-completeness" id="previewCompleteness">
+          <div style="font-size:11px;color:var(--text3)">Analysis Readiness</div>
+          <div class="bar-bg"><div class="bar-fill" id="readinessBar" style="width:0%"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ DASHBOARD ═══════════════════ -->
+<div id="dashboard">
+  <!-- Headline bar -->
+  <div class="headline-bar" id="headlineBar">
+    <span class="score-pill" id="headlinePill">—</span>
+    <span class="text" id="headlineText">Loading analysis...</span>
+  </div>
+
+  <!-- Risk chip strip -->
+  <div class="risk-strip" id="riskStrip"></div>
+
+  <!-- Action chip strip -->
+  <div class="action-strip" id="actionStrip"></div>
+
+  <!-- Tab bar -->
+  <div class="tab-bar" id="tabBar">
+    <button class="tab-btn active" data-tab="narrative">Narrative</button>
+    <button class="tab-btn" data-tab="risks">Risks</button>
+    <button class="tab-btn" data-tab="synthesizer">Synthesizer</button>
+    <button class="tab-btn" data-tab="playbook">Playbook</button>
+    <button class="tab-btn" data-tab="commander">Commander</button>
+  </div>
+
+  <!-- 3-col layout -->
+  <div class="dash-layout">
+    <!-- Left: Signal Feed -->
+    <div class="side-left">
+      <div class="side-section">
+        <div class="side-section-title">Live Signals</div>
+        <div id="modeBadge" class="mode-badge"></div>
+        <div id="signalFeed"></div>
+      </div>
+      <div class="side-section">
+        <div class="side-section-title">Market Data</div>
+        <div id="marketFeed"></div>
+      </div>
+    </div>
+
+    <!-- Center: Tabs -->
+    <div class="center-panel">
+      <!-- Tab: Narrative (chat) -->
+      <div class="tab-content active" id="tab-narrative">
+        <div class="chat-area">
+          <div class="chat-messages" id="chatMessages">
+            <div class="chat-msg assistant">
+              <div>I'm your Vigil strategic advisor. Ask me anything about your company's risk profile, whether to launch a product, invest, hire, or any strategic question.</div>
+            </div>
+          </div>
+          <div class="chat-input-row">
+            <input type="text" id="chatInput" placeholder="e.g. Should we launch a new product right now?">
+            <button class="btn-analyze" id="chatSend">ANALYZE</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Risks -->
+      <div class="tab-content" id="tab-risks">
+        <div style="margin-bottom:16px">
+          <div style="font-size:16px;font-weight:700;margin-bottom:4px">Risk Themes</div>
+          <div style="font-size:12px;color:var(--text2)">Named risks surfaced by the 8-agent pipeline</div>
+        </div>
+        <div class="risk-cards" id="riskCards"></div>
+      </div>
+
+      <!-- Tab: Synthesizer -->
+      <div class="tab-content" id="tab-synthesizer">
+        <div style="font-size:16px;font-weight:700;margin-bottom:12px">Executive Summary</div>
+        <div class="summary-box" id="execSummary"></div>
+
+        <div style="font-size:16px;font-weight:700;margin-bottom:12px">Agent Intelligence</div>
+        <div class="agents-grid" id="agentsGrid"></div>
+
+        <div style="font-size:16px;font-weight:700;margin:20px 0 12px">Inter-Agent Agreement</div>
+        <div class="card" style="padding:16px">
+          <div id="corrContainer"></div>
+          <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
+            <span style="font-size:11px;color:var(--text2)">Divergence Index:</span>
+            <span style="font-size:16px;font-weight:700" id="divIndex">—</span>
+            <span style="font-size:11px;color:var(--text2)" id="divLabel"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Playbook -->
+      <div class="tab-content" id="tab-playbook">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+          <div style="font-size:16px;font-weight:700">VIGIL PLAYBOOK</div>
+          <span style="font-size:12px;color:var(--text2)">—</span>
+          <span style="font-size:14px;font-weight:600;color:var(--accent)" id="playbookCompany"></span>
+        </div>
+        <div id="actionsContainer"></div>
+      </div>
+
+      <!-- Tab: Commander -->
+      <div class="tab-content" id="tab-commander">
+        <div style="font-size:16px;font-weight:700;margin-bottom:12px">Strategy Commander Output</div>
+        <div class="summary-box" id="commanderSummary"></div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:12px;color:var(--text2)">Planning Window</div>
+        <div class="card" style="padding:16px;margin-bottom:16px">
+          <div id="planningWindow" style="font-size:18px;font-weight:700;color:var(--accent)"></div>
+        </div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:12px;color:var(--text2)">Market Mode</div>
+        <div id="commanderMode" class="mode-badge" style="font-size:14px;padding:8px 20px"></div>
+      </div>
+    </div>
+
+    <!-- Right: Company Snapshot -->
+    <div class="side-right">
+      <div class="side-section">
+        <div class="side-section-title">Company Snapshot</div>
+        <div class="snap-company" id="snapName"></div>
+        <div class="snap-meta" id="snapMeta"></div>
+
+        <div class="snap-score-ring">
+          <div class="score-ring" style="width:120px;height:120px">
+            <svg width="120" height="120" viewBox="0 0 120 120">
+              <circle class="track" cx="60" cy="60" r="50" style="stroke-width:8"/>
+              <circle class="fill" id="snapArc" cx="60" cy="60" r="50"
+                stroke-dasharray="314" stroke-dashoffset="314" style="stroke-width:8"/>
+            </svg>
+            <div class="score-value" id="snapScore" style="font-size:28px">—</div>
+            <div class="score-label" style="font-size:9px;transform:translate(-50%,14px)">Risk</div>
+          </div>
+          <div id="snapTier" class="tier-badge" style="display:none;margin-top:8px"></div>
+        </div>
+
+        <div id="snapMetrics"></div>
+        <div class="snap-tags" id="snapTags"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">Vigil v2.0 · Autonomous Risk Intelligence · 8-Agent DAG Pipeline</div>
+
+<script>
+const TIER_COLORS = {GREEN:'#22c55e',YELLOW:'#eab308',ORANGE:'#f97316',RED:'#ef4444',CRITICAL:'#dc2626'};
+
+/* ── State ── */
+let sessionId = null;
+let analysisData = null;
+
+/* ── Elements ── */
+const form = document.getElementById('analysisForm');
+const loading = document.getElementById('loading');
+const onboarding = document.getElementById('onboarding');
+const dashboard = document.getElementById('dashboard');
+const dashNav = document.getElementById('dashNav');
+
+/* ── Chip toggle logic ── */
+document.querySelectorAll('.chip-group .chip').forEach(chip => {
+  chip.addEventListener('click', () => { chip.classList.toggle('active'); updatePreview(); });
+});
+
+/* ── Live preview updater ── */
+function getSelectedChips(containerId) {
+  return [...document.querySelectorAll(`#${containerId} .chip.active`)].map(c => c.dataset.val);
+}
+
+function updatePreview() {
+  const name = document.getElementById('f_name').value || 'Your Company';
+  const sector = document.getElementById('f_sector').value;
+  const country = document.getElementById('f_country').value;
+  const funding = document.getElementById('f_funding').value;
+  const arr = document.getElementById('f_arr').value;
+  const desc = document.getElementById('f_desc').value;
+  const risks = getSelectedChips('riskChips');
+  const regs = getSelectedChips('regChips');
+
+  document.getElementById('previewName').textContent = name;
+
+  const metaParts = [sector, country, funding, arr].filter(Boolean);
+  document.getElementById('previewMeta').textContent = metaParts.join(' · ') || 'Fill in details to see preview';
+
+  const tagsEl = document.getElementById('previewTags');
+  tagsEl.innerHTML = '';
+  regs.forEach(r => { tagsEl.innerHTML += `<span class="preview-tag warn">${r}</span>`; });
+  risks.slice(0, 3).forEach(r => { tagsEl.innerHTML += `<span class="preview-tag info">${r}</span>`; });
+
+  const alertEl = document.getElementById('previewAlert');
+  if (regs.length > 0 && sector) {
+    alertEl.style.display = 'block';
+    alertEl.innerHTML = `<strong>${name}</strong> faces elevated exposure to <strong>${regs[0]}</strong> enforcement given current market conditions — awaiting full agent analysis.`;
+  } else {
+    alertEl.style.display = 'none';
+  }
+
+  const fields = [
+    document.getElementById('f_name').value,
+    desc,
+    sector,
+    country,
+    document.getElementById('f_geography').value,
+  ];
+  const optional = [
+    document.getElementById('f_website').value,
+    document.getElementById('f_subsector').value,
+    arr,
+    funding,
+    document.getElementById('f_runway').value,
+    document.getElementById('f_team').value,
+    risks.length > 0 ? 'risks' : '',
+    regs.length > 0 ? 'regs' : '',
+  ];
+  const requiredFilled = fields.filter(Boolean).length;
+  const optionalFilled = optional.filter(Boolean).length;
+  const pct = Math.min(100, Math.round((requiredFilled / 5) * 60 + (optionalFilled / 8) * 40));
+  document.getElementById('completePct').textContent = pct + '%';
+  document.getElementById('completeBar').style.width = pct + '%';
+  document.getElementById('readinessBar').style.width = pct + '%';
+}
+
+['f_name','f_website','f_desc','f_sector','f_subsector','f_geography','f_country','f_operating',
+ 'f_arr','f_funding','f_runway','f_team','f_currency','f_tolerance'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', updatePreview);
+  if (el) el.addEventListener('change', updatePreview);
+});
+
+/* ── Loading animation ── */
+let animInterval;
+function showLoading() {
+  loading.classList.add('active');
+  document.getElementById('submitBtn').disabled = true;
+  let step = 0;
+  const stages = [
+    ['Tier 1 — Gathering Intelligence','SignalHarvester, NarrativeIntel, MacroWatchdog, CompetitiveIntel running in parallel'],
+    ['Tier 1 — Gathering Intelligence','Scanning price action & volume anomalies...'],
+    ['Tier 1 — Gathering Intelligence','Analysing media sentiment & narratives...'],
+    ['Tier 1 — Gathering Intelligence','Evaluating macroeconomic indicators...'],
+    ['Tier 1 — Gathering Intelligence','Mapping competitive landscape...'],
+    ['Tier 2 — Synthesizing Signals','MarketOracle correlating cross-agent data...'],
+    ['Tier 2 — Computing Risk Score','RiskSynthesizer applying Bayesian formula...'],
+    ['Tier 3 — Crafting Strategy','StrategyCommander building playbook...'],
+  ];
+  const stepsEl = [1,2,3,4,5,6,7].map(i => document.getElementById('step'+i));
+  animInterval = setInterval(() => {
+    if (step < stages.length) {
+      document.getElementById('loadingStage').textContent = stages[step][0];
+      document.getElementById('loadingText').textContent = stages[step][1];
+      const doneCount = step < 4 ? step : step < 5 ? 4 : step < 6 ? 5 : step < 7 ? 6 : 7;
+      stepsEl.forEach((s,i) => {
+        s.className = 'pipeline-step' + (i < doneCount ? ' done' : i === doneCount ? ' active' : '');
+      });
+      step++;
+    }
+  }, 3000);
+}
+function hideLoading() {
+  clearInterval(animInterval);
+  loading.classList.remove('active');
+  document.getElementById('submitBtn').disabled = false;
+}
+
+/* ── Tab switching ── */
+function switchTab(tabId) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === 'tab-'+tabId));
+}
+document.querySelectorAll('.tab-btn,.nav-item').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+
+/* ── Tier color helper ── */
+function tierColor(tier) { return TIER_COLORS[tier] || TIER_COLORS.YELLOW; }
+
+/* ── Render: Risk strip ── */
+function renderRiskStrip(themes) {
+  const el = document.getElementById('riskStrip');
+  el.innerHTML = '';
+  themes.forEach(t => {
+    const color = t.severity > 70 ? 'var(--red)' : t.severity > 50 ? 'var(--orange)' : t.severity > 30 ? 'var(--yellow)' : 'var(--green)';
+    el.innerHTML += `
+      <div class="risk-chip">
+        <div>
+          <div class="rc-name">${t.name}</div>
+          <div class="rc-bar"><div class="rc-bar-fill" style="width:${t.severity}%;background:${color}"></div></div>
+        </div>
+        <div class="rc-score" style="color:${color}">${Math.round(t.severity)}%</div>
+      </div>`;
+  });
+}
+
+/* ── Render: Action strip ── */
+function renderActionStrip(actions) {
+  const el = document.getElementById('actionStrip');
+  el.innerHTML = '';
+  actions.forEach(a => {
+    const d = a.deadline ? new Date(a.deadline) : null;
+    const dateStr = d ? d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : '';
+    const color = a.priority === 'CRITICAL' ? 'var(--red)' : a.priority === 'HIGH' ? 'var(--orange)' : 'var(--yellow)';
+    el.innerHTML += `
+      <div class="action-chip">
+        <span class="ac-dot" style="background:${color}"></span>
+        ${a.title}
+        <span class="ac-date">${dateStr}</span>
+      </div>`;
+  });
+}
+
+/* ── Render: Signal feed ── */
+function renderSignalFeed(feed, mode) {
+  const modeEl = document.getElementById('modeBadge');
+  const modeClass = mode.includes('OFF') ? 'RISK-OFF' : mode.includes('ON') ? 'RISK-ON' : mode.includes('CRISIS') ? 'CRISIS' : mode.includes('SELECTIVE') ? 'SELECTIVE' : 'TRANSITIONAL';
+  modeEl.className = 'mode-badge mode-' + modeClass;
+  modeEl.textContent = mode;
+
+  const el = document.getElementById('signalFeed');
+  el.innerHTML = '';
+  feed.forEach(s => {
+    const cls = s.sentiment === 'positive' ? 'pos' : s.sentiment === 'negative' ? 'neg' : s.sentiment === 'warning' ? 'warn' : 'neu';
+    el.innerHTML += `
+      <div class="signal-item">
+        <div class="si-label">${s.label}</div>
+        <div class="si-delta ${cls}">${s.delta}</div>
+      </div>`;
+  });
+}
+
+/* ── Render: Risk cards ── */
+function renderRiskCards(themes) {
+  const el = document.getElementById('riskCards');
+  el.innerHTML = '';
+  themes.forEach(t => {
+    const color = t.severity > 70 ? 'var(--red)' : t.severity > 50 ? 'var(--orange)' : t.severity > 30 ? 'var(--yellow)' : 'var(--green)';
+    el.innerHTML += `
+      <div class="risk-card" style="border-top-color:${color}">
+        <div class="rc-head">
+          <div class="rc-title">${t.name}</div>
+          <div class="rc-sev" style="color:${color}">${Math.round(t.severity)}%</div>
+        </div>
+        <div class="rc-cat">${t.category}</div>
+        <div class="rc-desc">${t.description}</div>
+        <div class="rc-agents">${t.source_agents.map(a => `<span class="rc-agent-tag">${a}</span>`).join('')}</div>
+      </div>`;
+  });
+}
+
+/* ── Render: Agent cards ── */
+function renderAgents(data) {
+  const grid = document.getElementById('agentsGrid');
+  grid.innerHTML = '';
+  const agents = [
+    {name:'Signal Harvester',icon:'&#9733;',color:'#6366f1',
+     score:data._raw?.signal_harvester?.signal_score,
+     body:data._raw?.signal_harvester?.technical_summary||'Analysed price action and volume data.',
+     tags:data._raw?.signal_harvester?.volume_anomalies||[]},
+    {name:'Narrative Intel',icon:'&#9993;',color:'#ec4899',
+     score:data._raw?.narrative_intel?.sentiment_score,
+     body:`Media volume: ${data._raw?.narrative_intel?.media_volume||'N/A'}`,
+     tags:data._raw?.narrative_intel?.key_narratives||[]},
+    {name:'Macro Watchdog',icon:'&#9854;',color:'#f59e0b',
+     score:data._raw?.macro_watchdog?.macro_risk_score,
+     body:`Rate outlook: ${data._raw?.macro_watchdog?.interest_rate_outlook||'N/A'} · S&P: ${data._raw?.macro_watchdog?.sp500_trend||'N/A'}`,
+     tags:Object.entries(data._raw?.macro_watchdog?.key_indicators||{}).map(([k,v])=>`${k}: ${v}`)},
+    {name:'Competitive Intel',icon:'&#9876;',color:'#10b981',
+     score:data._raw?.competitive_intel?.competitive_score,
+     body:`Moat: ${data._raw?.competitive_intel?.moat_strength||'N/A'} · Trend: ${data._raw?.competitive_intel?.market_share_trend||'N/A'}`,
+     tags:data._raw?.competitive_intel?.competitor_threats||[]},
+  ];
+  agents.forEach(a => {
+    grid.innerHTML += `
+      <div class="agent-card">
+        <div class="a-head">
+          <div class="a-icon" style="background:${a.color}22;color:${a.color}">${a.icon}</div>
+          <div class="a-name">${a.name}</div>
+          <div class="a-score" style="color:${a.color}">${a.score!=null?Math.round(a.score):'—'}</div>
+        </div>
+        <div class="a-body">${a.body}</div>
+        <div class="a-tags">${a.tags.slice(0,4).map(t=>`<span class="a-tag">${t}</span>`).join('')}</div>
+      </div>`;
+  });
+}
+
+/* ── Render: Playbook ── */
+function renderActions(actions) {
+  const c = document.getElementById('actionsContainer');
+  c.innerHTML = '';
+  actions.forEach((a,i) => {
+    const d = a.deadline ? new Date(a.deadline).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+    c.innerHTML += `
+      <div class="action-card">
+        <div class="ac-head">
+          <div class="ac-num">${i+1}</div>
+          <div class="ac-title">${a.title}</div>
+          <div class="ac-priority priority-${a.priority||'HIGH'}">${a.priority||'HIGH'}</div>
+        </div>
+        <div class="ac-desc">${a.description}</div>
+        <div class="ac-deadline">&#128197; Deadline: ${d}</div>
+      </div>`;
+  });
+}
+
+/* ── Render: Correlations ── */
+function renderCorrelations(corr, div) {
+  const c = document.getElementById('corrContainer');
+  c.innerHTML = '';
+  const labels = {
+    signal_narrative:'Signal ↔ Narrative',signal_macro:'Signal ↔ Macro',
+    signal_competitive:'Signal ↔ Competitive',narrative_macro:'Narrative ↔ Macro',
+    narrative_competitive:'Narrative ↔ Competitive',macro_competitive:'Macro ↔ Competitive',
+  };
+  Object.entries(corr).forEach(([key,val]) => {
+    const pct = ((val+1)/2)*100;
+    const color = val > 0.2 ? 'var(--green)' : val < -0.2 ? 'var(--red)' : 'var(--yellow)';
+    c.innerHTML += `
+      <div class="corr-item">
+        <div class="corr-label">${labels[key]||key}</div>
+        <div class="corr-bar-bg"><div class="corr-bar" style="width:${pct}%;background:${color}"></div></div>
+        <div class="corr-val" style="color:${color}">${val.toFixed(2)}</div>
+      </div>`;
+  });
+  document.getElementById('divIndex').textContent = div.toFixed(3);
+  document.getElementById('divLabel').textContent = '— ' + (div < 0.15 ? 'Strong consensus' : div < 0.3 ? 'Moderate agreement' : 'High divergence');
+}
+
+/* ── Render: Right snapshot panel ── */
+function renderSnapshot(data) {
+  document.getElementById('snapName').textContent = data.company;
+  const meta = [data._profile?.sector, data._profile?.country, data._profile?.funding_stage].filter(Boolean);
+  document.getElementById('snapMeta').textContent = meta.join(' · ');
+
+  const arc = document.getElementById('snapArc');
+  const circ = 314;
+  arc.style.strokeDashoffset = circ - (data.risk_score/100) * circ;
+  arc.style.stroke = tierColor(data.risk_tier);
+
+  const scoreEl = document.getElementById('snapScore');
+  scoreEl.textContent = Math.round(data.risk_score);
+  scoreEl.style.color = tierColor(data.risk_tier);
+
+  const tierEl = document.getElementById('snapTier');
+  tierEl.style.display = 'inline-block';
+  tierEl.className = 'tier-badge tier-' + data.risk_tier;
+  tierEl.textContent = data.risk_tier;
+
+  const metricsEl = document.getElementById('snapMetrics');
+  metricsEl.innerHTML = '';
+  const metrics = [
+    ['Market Regime', data.market_regime],
+    ['Entropy', data.entropy_factor?.toFixed(3)],
+    ['Confidence', `${data.confidence_interval[0]}–${data.confidence_interval[1]}`],
+    ['Duration', data.pipeline_duration_seconds?.toFixed(1)+'s'],
+  ];
+  metrics.forEach(([l,v]) => {
+    metricsEl.innerHTML += `<div class="snap-metric"><span class="label">${l}</span><span class="val">${v||'—'}</span></div>`;
+  });
+
+  const tagsEl = document.getElementById('snapTags');
+  tagsEl.innerHTML = '';
+  (data._profile?.active_regulations||[]).forEach(r => {
+    tagsEl.innerHTML += `<span class="preview-tag warn">${r}</span>`;
+  });
+  (data._profile?.risk_exposures||[]).slice(0,3).forEach(r => {
+    tagsEl.innerHTML += `<span class="preview-tag info">${r}</span>`;
+  });
+}
+
+/* ── Main: display all results ── */
+function displayResults(data) {
+  onboarding.style.display = 'none';
+  dashboard.classList.add('visible');
+  dashNav.style.display = 'flex';
+  document.getElementById('topbarCompany').style.display = 'inline';
+  document.getElementById('topbarCompany').textContent = data.company;
+
+  // Headline
+  const headlineText = data.executive_headline || `${data.company} — Risk Score: ${Math.round(data.risk_score)} (${data.risk_tier})`;
+  document.getElementById('headlineText').textContent = headlineText;
+  const pill = document.getElementById('headlinePill');
+  pill.textContent = Math.round(data.risk_score);
+  pill.style.background = tierColor(data.risk_tier) + '22';
+  pill.style.color = tierColor(data.risk_tier);
+
+  // Risk strip
+  renderRiskStrip(data.risk_themes || []);
+
+  // Action strip
+  renderActionStrip(data.strategic_actions || []);
+
+  // Signal feed
+  renderSignalFeed(data.signal_feed || [], data.market_mode || 'TRANSITIONAL');
+
+  // Risk cards
+  renderRiskCards(data.risk_themes || []);
+
+  // Executive summary
+  document.getElementById('execSummary').textContent = data.executive_summary || 'No summary available.';
+
+  // Agent cards
+  renderAgents(data);
+
+  // Correlations
+  renderCorrelations(data.agent_correlations || {}, data.divergence_index || 0);
+
+  // Playbook
+  document.getElementById('playbookCompany').textContent = data.company;
+  renderActions(data.strategic_actions || []);
+
+  // Commander
+  document.getElementById('commanderSummary').textContent = data.executive_summary;
+  document.getElementById('planningWindow').textContent = data.planning_window || '~30 days';
+  const cmdMode = document.getElementById('commanderMode');
+  const mm = data.market_mode || 'TRANSITIONAL';
+  const mc = mm.includes('OFF') ? 'RISK-OFF' : mm.includes('ON') ? 'RISK-ON' : mm.includes('CRISIS') ? 'CRISIS' : mm.includes('SELECTIVE') ? 'SELECTIVE' : 'TRANSITIONAL';
+  cmdMode.className = 'mode-badge mode-' + mc;
+  cmdMode.textContent = mm;
+
+  // Right snapshot
+  renderSnapshot(data);
+}
+
+/* ── Form submit ── */
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  showLoading();
+
+  const body = {
+    company_name: document.getElementById('f_name').value,
+    website: document.getElementById('f_website').value || null,
+    sector: document.getElementById('f_sector').value || null,
+    subsector: document.getElementById('f_subsector').value || null,
+    description: document.getElementById('f_desc').value,
+    geography: document.getElementById('f_geography').value,
+    country: document.getElementById('f_country').value,
+    operating_in: document.getElementById('f_operating').value ? document.getElementById('f_operating').value.split(',').map(s=>s.trim()) : [],
+    arr_range: document.getElementById('f_arr').value || null,
+    funding_stage: document.getElementById('f_funding').value || null,
+    runway: document.getElementById('f_runway').value || null,
+    team_size: document.getElementById('f_team').value || null,
+    revenue_currency: document.getElementById('f_currency').value,
+    risk_exposures: getSelectedChips('riskChips'),
+    active_regulations: getSelectedChips('regChips'),
+    risk_tolerance: parseInt(document.getElementById('f_tolerance').value) / 100,
+  };
+
+  try {
+    const res = await fetch('/analyse', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({}));
+      throw new Error(err.detail || `Server error ${res.status}`);
+    }
+    const data = await res.json();
+    sessionId = data.session_id;
+
+    try {
+      const full = await fetch(`/session/${data.session_id}/full`);
+      if (full.ok) { data._raw = await full.json(); }
+    } catch(_) {}
+
+    data._profile = body;
+    analysisData = data;
+    hideLoading();
+    displayResults(data);
+  } catch (err) {
+    hideLoading();
+    alert('Analysis failed: ' + err.message);
+  }
+});
+
+/* ── Chat ── */
+const chatInput = document.getElementById('chatInput');
+const chatSend = document.getElementById('chatSend');
+const chatMessages = document.getElementById('chatMessages');
+
+async function sendChat() {
+  const msg = chatInput.value.trim();
+  if (!msg || !sessionId) return;
+
+  chatMessages.innerHTML += `<div class="chat-msg user"><div>${msg}</div></div>`;
+  chatInput.value = '';
+  chatSend.disabled = true;
+
+  const typing = document.createElement('div');
+  typing.className = 'chat-msg assistant';
+  typing.innerHTML = '<div style="color:var(--text2)">Analyzing...</div>';
+  chatMessages.appendChild(typing);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({session_id: sessionId, message: msg}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({}));
+      throw new Error(err.detail || 'Chat failed');
+    }
+    const data = await res.json();
+    typing.remove();
+
+    let meta = '';
+    if (data.risk_score != null) {
+      meta = `<div class="msg-meta"><span>Risk: ${Math.round(data.risk_score)} (${data.risk_tier})</span></div>`;
+    }
+    chatMessages.innerHTML += `<div class="chat-msg assistant"><div>${data.reply.replace(/\n/g,'<br>')}</div>${meta}</div>`;
+  } catch (err) {
+    typing.remove();
+    chatMessages.innerHTML += `<div class="chat-msg assistant"><div style="color:var(--red)">Error: ${err.message}</div></div>`;
+  }
+  chatSend.disabled = false;
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+chatSend.addEventListener('click', sendChat);
+chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+
+/* ── Init ── */
+updatePreview();
+</script>
+</body>
+</html>
