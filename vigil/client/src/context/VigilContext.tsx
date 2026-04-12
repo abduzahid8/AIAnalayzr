@@ -9,7 +9,7 @@ import {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { vigilApi } from '@/src/lib/api';
+import { vigilApi, type StreamEvent } from '@/src/lib/api';
 import type {
   AnalysisRequest,
   AnalysisResponse,
@@ -17,6 +17,13 @@ import type {
 } from '@/src/types/vigil';
 
 const SESSION_KEY = 'vigil_session_id';
+
+type PipelineProgress = {
+  stage: string;
+  detail: string;
+  current: number;
+  total: number;
+};
 
 type VigilContextValue = {
   apiBaseUrl: string;
@@ -26,6 +33,7 @@ type VigilContextValue = {
   isAnalyzing: boolean;
   isSendingChat: boolean;
   lastError: string | null;
+  pipelineProgress: PipelineProgress | null;
   runAnalysis: (payload: AnalysisRequest) => Promise<void>;
   sendChat: (message: string) => Promise<void>;
   clearError: () => void;
@@ -69,6 +77,7 @@ export function VigilProvider({ children }: PropsWithChildren) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSendingChat, setIsSendingChat] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [pipelineProgress, setPipelineProgress] = useState<PipelineProgress | null>(null);
 
   useEffect(() => {
     AsyncStorage.getItem(SESSION_KEY).then((stored) => {
@@ -91,9 +100,9 @@ export function VigilProvider({ children }: PropsWithChildren) {
   const runAnalysis = useCallback(async (payload: AnalysisRequest) => {
     setIsAnalyzing(true);
     setLastError(null);
+    setPipelineProgress(null);
 
-    try {
-      const result = await vigilApi.analyse(payload);
+    const onStreamResult = (result: AnalysisResponse) => {
       setAnalysis(result);
       setSessionId(result.session_id);
       AsyncStorage.setItem(SESSION_KEY, result.session_id);
@@ -105,10 +114,30 @@ export function VigilProvider({ children }: PropsWithChildren) {
           `Risk ${Math.round(result.risk_score)} (${result.risk_tier})`,
         ),
       ]);
-    } catch (error) {
-      setLastError(getErrorMessage(error));
+    };
+
+    try {
+      const result = await vigilApi.analyseStream(payload, (event: StreamEvent) => {
+        if (event.type === 'progress') {
+          setPipelineProgress({
+            stage: event.stage,
+            detail: event.detail,
+            current: event.current_stage,
+            total: event.total_stages,
+          });
+        }
+      });
+      onStreamResult(result);
+    } catch {
+      try {
+        const result = await vigilApi.analyse(payload);
+        onStreamResult(result);
+      } catch (error) {
+        setLastError(getErrorMessage(error));
+      }
     } finally {
       setIsAnalyzing(false);
+      setPipelineProgress(null);
     }
   }, []);
 
@@ -158,6 +187,7 @@ export function VigilProvider({ children }: PropsWithChildren) {
       isAnalyzing,
       isSendingChat,
       lastError,
+      pipelineProgress,
       runAnalysis,
       sendChat,
       clearError,
@@ -170,6 +200,7 @@ export function VigilProvider({ children }: PropsWithChildren) {
       isAnalyzing,
       isSendingChat,
       lastError,
+      pipelineProgress,
       resetAnalysis,
       runAnalysis,
       sendChat,

@@ -1,13 +1,15 @@
-"""Adaptive Bayesian scoring engine.
+"""Adaptive weighted scoring engine.
 
 Sector-specific weight profiles, volatility regime adjustment,
-non-linear threshold triggers, and confidence-weighted scoring.
+non-linear threshold triggers, confidence-weighted scoring, and
+optional historical shrinkage.
 
-The static formula is replaced with a dynamic one that adapts to:
+The scoring formula adapts dynamically based on:
   - Company sector (fintech weights macro higher, consumer weights narrative higher)
   - VIX regime (high VIX shifts weight toward market signals)
-  - Agent confidence (low-confidence agents get weight reduced)
+  - Agent data quality (low-quality agents get weight reduced)
   - Non-linear circuit breakers (VIX > 30, sentiment flips, yield inversions)
+  - Historical baseline (shrinkage toward sector average when available)
 """
 
 from __future__ import annotations
@@ -150,11 +152,23 @@ def _apply_vix_regime_adjustment(
     return {k: round(v / total, 4) for k, v in adjusted.items()}
 
 
+DATA_QUALITY_CONFIDENCE: dict[str, float] = {
+    "rich": 0.90,
+    "moderate": 0.70,
+    "partial": 0.50,
+    "sparse": 0.30,
+}
+
+
 def _apply_confidence_weighting(
     weights: dict[str, float],
     confidences: dict[str, float] | None,
 ) -> dict[str, float]:
-    """Reduce weight for low-confidence agents proportionally."""
+    """Reduce weight for low-confidence agents proportionally.
+
+    Uses data-quality-derived confidence rather than LLM self-reported
+    confidence to avoid circular dependency in scoring.
+    """
     if not confidences:
         return weights
 
@@ -170,8 +184,12 @@ def _apply_confidence_weighting(
     return {k: round(v / total, 4) for k, v in adjusted.items()}
 
 
-def compute_entropy_factor(scores: list[float]) -> float:
-    """Quantify inter-agent disagreement as an entropy-inspired multiplier."""
+def compute_disagreement_factor(scores: list[float]) -> float:
+    """Quantify inter-agent disagreement as a spread-based amplifier.
+
+    Higher spread between agent scores -> higher multiplier (capped at 1.5x).
+    This is NOT Shannon entropy; it measures score dispersion.
+    """
     if len(scores) < 2:
         return 1.0
     spread = float(max(scores) - min(scores))
@@ -180,9 +198,12 @@ def compute_entropy_factor(scores: list[float]) -> float:
     if spread <= 10.0:
         return 1.0
     base = 1.0 + 0.002 * spread
-    entropy_bonus = 0.01 * math.log1p(std)
-    return round(min(base + entropy_bonus, 1.5), 4)
+    disagreement_bonus = 0.01 * math.log1p(std)
+    return round(min(base + disagreement_bonus, 1.5), 4)
 
+
+# Backward-compatible alias
+compute_entropy_factor = compute_disagreement_factor
 
 MACRO_DIVERGENCE_THRESHOLD = 25.0
 
@@ -231,7 +252,10 @@ def _compute_threshold_premium(
     return premium, triggered
 
 
-def adaptive_bayesian_score(
+HISTORICAL_SHRINKAGE = 0.15
+
+
+def adaptive_weighted_score(
     market: float,
     macro: float,
     narrative: float,
@@ -242,22 +266,20 @@ def adaptive_bayesian_score(
     confidences: dict[str, float] | None = None,
     yield_spread: float | None = None,
     prev_narrative_score: float | None = None,
+    historical_baseline: float | None = None,
 ) -> dict:
     """Compute the adaptive risk score.
 
-    Returns raw_score, entropy_factor, final_score, confidence_interval,
+    Uses sector-weighted linear combination with disagreement amplification,
+    circuit breaker premiums, and optional shrinkage toward historical baseline.
+
+    Returns raw_score, disagreement_factor, final_score, confidence_interval,
     risk_tier, scoring_breakdown, and weight_profile_used.
     """
-    # 1. Resolve sector-specific weights
     base_weights, profile_name = _resolve_sector_profile(sector)
-
-    # 2. Apply VIX regime adjustment
     weights = _apply_vix_regime_adjustment(base_weights, vix_level)
-
-    # 3. Apply confidence weighting
     weights = _apply_confidence_weighting(weights, confidences)
 
-    # 4. Compute weighted score
     raw = (
         market * weights["market"]
         + macro * weights["macro"]
@@ -265,11 +287,9 @@ def adaptive_bayesian_score(
         + competitive * weights["competitive"]
     )
 
-    # 5. Entropy factor
     scores = [market, macro, narrative, competitive]
-    entropy = compute_entropy_factor(scores)
+    disagreement = compute_disagreement_factor(scores)
 
-    # 6. Threshold premiums (all circuit breakers active)
     premium, circuit_breakers = _compute_threshold_premium(
         raw, vix_level,
         narrative_score=narrative,
@@ -279,21 +299,27 @@ def adaptive_bayesian_score(
         prev_narrative_score=prev_narrative_score,
     )
 
-    # 7. Final score
-    final = round(max(0.0, min(100.0, raw * entropy + premium)), 2)
+    final = round(max(0.0, min(100.0, raw * disagreement + premium)), 2)
 
-    # 8. Confidence interval — widen CI when circuit breakers fire
+    if historical_baseline is not None:
+        final = round(
+            final * (1 - HISTORICAL_SHRINKAGE)
+            + historical_baseline * HISTORICAL_SHRINKAGE,
+            2,
+        )
+        final = round(max(0.0, min(100.0, final)), 2)
+
     std = float(pstdev(scores))
     cb_uncertainty = 1.0 + 0.15 * len(circuit_breakers)
     ci_low = round(max(0.0, final - 1.96 * std * cb_uncertainty), 2)
     ci_high = round(min(100.0, final + 1.96 * std * cb_uncertainty), 2)
 
-    # 9. Tier assignment
     tier = score_to_tier(final)
 
     return {
         "raw_score": round(raw, 2),
-        "entropy_factor": entropy,
+        "entropy_factor": disagreement,  # kept for API compat
+        "disagreement_factor": disagreement,
         "final_score": final,
         "confidence_interval": (ci_low, ci_high),
         "risk_tier": tier,
@@ -308,17 +334,21 @@ def adaptive_bayesian_score(
         "weights_used": weights,
         "weight_profile_used": profile_name,
         "vix_regime_active": vix_level is not None and vix_level >= VIX_ELEVATED_THRESHOLD,
+        "historical_shrinkage_applied": historical_baseline is not None,
     }
 
 
-# Keep backward-compatible alias
+# Backward-compatible aliases
+adaptive_bayesian_score = adaptive_weighted_score
+
+
 def bayesian_score(
     market: float,
     macro: float,
     narrative: float,
     competitive: float,
 ) -> dict:
-    return adaptive_bayesian_score(
+    return adaptive_weighted_score(
         market=market, macro=macro,
         narrative=narrative, competitive=competitive,
     )

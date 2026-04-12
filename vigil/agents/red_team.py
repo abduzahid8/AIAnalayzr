@@ -6,9 +6,6 @@ the Red Team actively tries to BREAK the analysis by:
   2. Constructing plausible counter-narratives from the same data
   3. Testing whether the score would survive a hostile cross-examination
   4. Identifying single points of failure in the reasoning chain
-
-This is the hardest layer for competitors to replicate because it requires
-understanding the full pipeline architecture, not just individual agents.
 """
 
 from __future__ import annotations
@@ -17,7 +14,7 @@ import json
 import logging
 
 from vigil.core.config import settings
-from vigil.core.state import VigilState
+from vigil.core.state import RedTeamResult, RedTeamVulnerability, VigilState
 from vigil.services.llm import llm_json
 
 logger = logging.getLogger("vigil.agents.red_team")
@@ -77,16 +74,17 @@ Return ONLY valid JSON:
 </output_format>
 """
 
+_SKIP_RESULT = RedTeamResult(
+    counter_narrative="Red team skipped",
+    robustness_score=0.5,
+)
+
 
 async def run_red_team(state: VigilState, data_bundle=None) -> VigilState:
     """Execute the Red Team adversarial challenge."""
     if settings.vigil_tier == "free":
         logger.info("Red Team skipped (free tier)")
-        state.red_team_result = {
-            "vulnerabilities": [],
-            "counter_narrative": "Red team skipped",
-            "robustness_score": 0.5,
-        }
+        state.red_team_result = _SKIP_RESULT.model_copy()
         return state
 
     tier1_summary = _build_tier1_summary(state)
@@ -120,40 +118,39 @@ async def run_red_team(state: VigilState, data_bundle=None) -> VigilState:
     try:
         result = await llm_json(RED_TEAM_PROMPT, user_msg, max_tokens=3000)
 
-        vulns = result.get("vulnerabilities", [])
-        cleaned_vulns = []
-        for v in vulns[:6]:
+        vulns_raw = result.get("vulnerabilities", [])
+        vulnerabilities = []
+        for v in vulns_raw[:6]:
             if isinstance(v, dict):
-                cleaned_vulns.append({
-                    "attack": str(v.get("attack", "")),
-                    "finding": str(v.get("finding", "")),
-                    "severity": str(v.get("severity", "minor")),
-                    "counter_evidence": str(v.get("counter_evidence", "")),
-                    "score_impact_estimate": float(v.get("score_impact_estimate", 0)),
-                })
+                vulnerabilities.append(RedTeamVulnerability(
+                    attack=str(v.get("attack", "")),
+                    finding=str(v.get("finding", "")),
+                    severity=str(v.get("severity", "minor")),
+                    counter_evidence=str(v.get("counter_evidence", "")),
+                    score_impact_estimate=float(v.get("score_impact_estimate", 0)),
+                ))
 
-        state.red_team_result = {
-            "vulnerabilities": cleaned_vulns,
-            "counter_narrative": str(result.get("counter_narrative", "")),
-            "weakest_agent": str(result.get("weakest_agent", "")),
-            "robustness_score": max(0.0, min(1.0, float(result.get("robustness_score", 0.5)))),
-            "recommendation": str(result.get("recommendation", "")),
-        }
+        state.red_team_result = RedTeamResult(
+            vulnerabilities=vulnerabilities,
+            counter_narrative=str(result.get("counter_narrative", "")),
+            weakest_agent=str(result.get("weakest_agent", "")),
+            robustness_score=max(0.0, min(1.0, float(result.get("robustness_score", 0.5)))),
+            recommendation=str(result.get("recommendation", "")),
+        )
 
-        critical_count = sum(1 for v in cleaned_vulns if v.get("severity") == "critical")
+        critical_count = sum(1 for v in vulnerabilities if v.severity == "critical")
         logger.info(
             "Red Team complete – %d vulnerabilities (%d critical), robustness=%.2f",
-            len(cleaned_vulns), critical_count,
-            state.red_team_result["robustness_score"],
+            len(vulnerabilities), critical_count,
+            state.red_team_result.robustness_score,
         )
 
     except Exception as exc:
         logger.warning("Red Team protocol failed: %s", exc)
-        state.red_team_result = {
-            "vulnerabilities": [],
-            "counter_narrative": f"Red team failed: {exc}",
-            "robustness_score": 0.5,
-        }
+        state.red_team_result = RedTeamResult(
+            counter_narrative=f"Red team failed: {exc}",
+            robustness_score=0.5,
+        )
 
     return state
 

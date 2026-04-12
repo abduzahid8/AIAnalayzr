@@ -1,16 +1,14 @@
 import { Link, Stack } from 'expo-router';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
-import { Text, View } from 'react-native';
-
-import { colors } from '@/src/theme';
+import { colors, fonts } from '@/src/theme';
 
 export default function NotFoundScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Not found' }} />
       <View style={styles.container}>
-        <Text style={styles.title}>This route does not exist.</Text>
+        <Text style={styles.title}>Route not found.</Text>
         <Text style={styles.subtitle}>Go back to the analysis dashboard and continue from there.</Text>
 
         <Link href="/" style={styles.link}>
@@ -31,12 +29,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   title: {
+    fontFamily: fonts.serif,
     color: colors.text,
     fontSize: 24,
-    fontWeight: '800',
   },
   subtitle: {
-    color: colors.textMuted,
+    fontFamily: fonts.sans,
+    color: colors.textSecondary,
     fontSize: 15,
     lineHeight: 22,
     maxWidth: 420,
@@ -47,8 +46,9 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
   },
   linkText: {
-    color: colors.accent,
-    fontSize: 15,
-    fontWeight: '700',
+    fontFamily: fonts.monoBold,
+    color: colors.gold,
+    fontSize: 13,
+    letterSpacing: 1,
   },
 });

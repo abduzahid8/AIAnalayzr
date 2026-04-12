@@ -9,6 +9,7 @@ Enhanced with sector ETFs, treasury yield spread, and FX rates.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import csv
 from dataclasses import dataclass, field
@@ -74,18 +75,38 @@ class MarketSnapshot:
     treasury_2y: float | None = None
 
 
-async def _fetch_alpha_vantage_quote(symbol: str, client: httpx.AsyncClient) -> float | None:
+async def _fetch_alpha_vantage_quote(
+    symbol: str,
+    client: httpx.AsyncClient,
+    *,
+    max_retries: int = 2,
+) -> float | None:
     params = {
         "function": "GLOBAL_QUOTE",
         "symbol": symbol,
         "apikey": settings.alpha_vantage_api_key,
     }
-    resp = await client.get(ALPHA_VANTAGE_BASE, params=params, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    quote = data.get("Global Quote", {})
-    price_str = quote.get("05. price")
-    return float(price_str) if price_str else None
+    for attempt in range(max_retries + 1):
+        resp = await client.get(ALPHA_VANTAGE_BASE, params=params, timeout=10)
+        if resp.status_code == 429 or (resp.status_code >= 500 and attempt < max_retries):
+            wait = 2 ** attempt
+            logger.warning("Alpha Vantage %s: HTTP %d, retrying in %ds", symbol, resp.status_code, wait)
+            await asyncio.sleep(wait)
+            continue
+        resp.raise_for_status()
+        data = resp.json()
+        if "Note" in data or "Information" in data:
+            if attempt < max_retries:
+                wait = 2 ** attempt + 1
+                logger.warning("Alpha Vantage rate limit note for %s, retrying in %ds", symbol, wait)
+                await asyncio.sleep(wait)
+                continue
+            logger.warning("Alpha Vantage rate limit exhausted for %s", symbol)
+            return None
+        quote = data.get("Global Quote", {})
+        price_str = quote.get("05. price")
+        return float(price_str) if price_str else None
+    return None
 
 
 async def _fetch_fred_series(series_id: str, client: httpx.AsyncClient) -> float | None:

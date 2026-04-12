@@ -3,23 +3,44 @@ import { DarkTheme, type Theme } from '@react-navigation/native';
 import type { RiskTier } from '@/src/types/vigil';
 
 /**
- * 3-color palette:
- *   Dark   #070b14  (backgrounds, surfaces, borders — opacity variants)
- *   Light  #e2e8f0  (text — opacity variants)
- *   Accent #00e5a0  (interactive, highlights — opacity variants)
+ * "Noir Bureau" design system
  *
- * Tier colors appear ONLY on the score ring number.
+ * Palette anchored on deep noir backgrounds with warm antique-gold accents.
+ * Three typographic voices: editorial serif, terminal mono, clean sans.
  */
+
 export const colors = {
-  background: '#070b14',
-  surface: '#0d1321',
-  surfaceAlt: '#151d2e',
-  border: '#1e2d42',
-  text: '#e2e8f0',
-  textMuted: '#8896ab',
-  textDim: '#4a5568',
-  accent: '#00e5a0',
-  accentMuted: 'rgba(0,229,160,0.12)',
+  background: '#08080c',
+  surface: '#101018',
+  surfaceRaised: '#1a1a24',
+  border: '#242432',
+  borderSubtle: '#1a1a26',
+
+  text: '#ece7dd',
+  textSecondary: '#8c857c',
+  textDim: '#52504a',
+
+  gold: '#c9a04e',
+  goldMuted: 'rgba(201,160,78,0.14)',
+  goldSubtle: 'rgba(201,160,78,0.06)',
+
+  teal: '#54aab6',
+  tealMuted: 'rgba(84,170,182,0.12)',
+
+  danger: '#c45050',
+  dangerMuted: 'rgba(196,80,80,0.12)',
+
+  success: '#4bbd6c',
+  successMuted: 'rgba(75,189,108,0.12)',
+} as const;
+
+export const fonts = {
+  serif: 'DMSerifDisplay_400Regular',
+  mono: 'JetBrainsMono_400Regular',
+  monoBold: 'JetBrainsMono_700Bold',
+  sans: 'DMSans_400Regular',
+  sansMedium: 'DMSans_500Medium',
+  sansBold: 'DMSans_700Bold',
 } as const;
 
 export const navigationTheme: Theme = {
@@ -30,24 +51,24 @@ export const navigationTheme: Theme = {
     card: colors.surface,
     border: colors.border,
     text: colors.text,
-    notification: colors.accent,
-    primary: colors.accent,
+    notification: colors.gold,
+    primary: colors.gold,
   },
 };
 
 export function getTierColor(tier?: RiskTier | null) {
   switch (tier) {
     case 'GREEN':
-      return '#22c55e';
+      return colors.success;
     case 'YELLOW':
-      return '#eab308';
+      return '#d4a24a';
     case 'ORANGE':
-      return '#f97316';
+      return '#e08a3c';
     case 'RED':
     case 'CRITICAL':
-      return '#ef4444';
+      return colors.danger;
     default:
-      return colors.accent;
+      return colors.gold;
   }
 }
 
@@ -66,23 +87,23 @@ export const AGENT_STAGES = [
 export const BENEFITS = [
   {
     icon: 'filter' as const,
-    title: 'Cuts Through Noise',
-    desc: '9 specialized AI agents filter thousands of market signals into what actually matters for your company.',
+    title: 'Signal from Noise',
+    desc: '9 specialized AI agents distill thousands of market signals into what matters for your company.',
   },
   {
     icon: 'bolt' as const,
-    title: 'Real-Time Intelligence',
-    desc: 'From raw data to executive strategy in under 90 seconds. No more waiting weeks for quarterly risk reports.',
+    title: 'Real-Time Intel',
+    desc: 'Raw data to executive strategy in under 90 seconds. No quarterly lag.',
   },
   {
     icon: 'comments' as const,
-    title: 'Cross-Validated',
-    desc: 'Agents debate each other\u2019s findings through an adversarial protocol to eliminate false signals.',
+    title: 'Adversarial Validation',
+    desc: 'Agents debate each other through an adversarial protocol to eliminate false positives.',
   },
   {
     icon: 'list-ol' as const,
     title: 'Action-First Playbook',
-    desc: 'Not just insights \u2014 a prioritized 30-day strategic playbook with hard deadlines and ownership.',
+    desc: 'A prioritized 30-day strategic playbook with deadlines and ownership, not a PDF.',
   },
 ] as const;
 
@@ -95,14 +116,14 @@ export const HOW_IT_WORKS = [
   },
   {
     step: 2,
-    title: '9 AI Agents Analyze',
-    desc: 'Signal, sentiment, macro, competitive, and predictive agents work in a coordinated relay.',
+    title: '9 Agents Analyze',
+    desc: 'Signal, sentiment, macro, competitive, and predictive agents work in a coordinated pipeline.',
     icon: 'cogs' as const,
   },
   {
     step: 3,
     title: 'Get Your Playbook',
-    desc: 'Receive a risk score (0\u2013100), tier assessment, and a 30-day strategic action plan.',
+    desc: 'Receive a composite risk score, tier assessment, and a concrete 30-day action plan.',
     icon: 'rocket' as const,
   },
 ] as const;

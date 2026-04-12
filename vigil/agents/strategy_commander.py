@@ -182,11 +182,11 @@ def _build_briefing_context(state: VigilState) -> str:
         sections.extend([
             "",
             "=== Red Team Challenge ===",
-            f"Vulnerabilities Found: {len(state.red_team_result.get('vulnerabilities', []))}",
-            f"Overall Robustness: {state.red_team_result.get('robustness_score', 'N/A')}",
+            f"Vulnerabilities Found: {len(state.red_team_result.vulnerabilities)}",
+            f"Overall Robustness: {state.red_team_result.robustness_score}",
         ])
-        for v in state.red_team_result.get("vulnerabilities", [])[:3]:
-            sections.append(f"  - [{v.get('severity', '?')}] {v.get('attack', '')}: {v.get('finding', '')}")
+        for v in state.red_team_result.vulnerabilities[:3]:
+            sections.append(f"  - [{v.severity}] {v.attack}: {v.finding}")
 
     if state.fingerprint and state.fingerprint.historical_avg_score is not None:
         sections.extend([
@@ -275,11 +275,18 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
     actions_raw = data.get("actions", [])[:5]
     actions = []
     for i, a in enumerate(actions_raw, start=1):
+        if not isinstance(a, dict):
+            continue
+        title = a.get("title")
+        description = a.get("description")
+        deadline = a.get("deadline")
+        if not title or not description or not deadline:
+            continue
         actions.append(StrategicAction(
             action_id=a.get("action_id", i),
-            title=a["title"],
-            description=a["description"],
-            deadline=a["deadline"],
+            title=title,
+            description=description,
+            deadline=deadline,
             priority=a.get("priority", "HIGH"),
         ))
 

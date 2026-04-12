@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Any
 
-from vigil.core.scoring import adaptive_bayesian_score
+from vigil.core.scoring import adaptive_weighted_score, DATA_QUALITY_CONFIDENCE
 from vigil.core.state import (
     AgentConfidence,
     AnomalyFlag,
@@ -121,10 +121,18 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
     )
 
     confidences = {
-        "market": state.market_oracle.confidence.score if state.market_oracle else 0.5,
-        "macro": state.macro_watchdog.confidence.score if state.macro_watchdog else 0.5,
-        "narrative": state.narrative_intel.confidence.score if state.narrative_intel else 0.5,
-        "competitive": state.competitive_intel.confidence.score if state.competitive_intel else 0.5,
+        "market": DATA_QUALITY_CONFIDENCE.get(
+            state.market_oracle.confidence.data_quality if state.market_oracle else "sparse", 0.5,
+        ),
+        "macro": DATA_QUALITY_CONFIDENCE.get(
+            state.macro_watchdog.confidence.data_quality if state.macro_watchdog else "sparse", 0.5,
+        ),
+        "narrative": DATA_QUALITY_CONFIDENCE.get(
+            state.narrative_intel.confidence.data_quality if state.narrative_intel else "sparse", 0.5,
+        ),
+        "competitive": DATA_QUALITY_CONFIDENCE.get(
+            state.competitive_intel.confidence.data_quality if state.competitive_intel else "sparse", 0.5,
+        ),
     }
 
     vix_level = None
@@ -136,8 +144,9 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
         yield_spread = state.macro_watchdog.key_indicators.get("yield_spread_2y10y")
 
     prev_narrative = _get_previous_narrative_score(state)
+    historical_baseline = _get_historical_baseline(state)
 
-    quant_result = adaptive_bayesian_score(
+    quant_result = adaptive_weighted_score(
         market=market_score,
         macro=macro_score,
         narrative=narrative_score,
@@ -147,6 +156,7 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
         confidences=confidences,
         yield_spread=yield_spread,
         prev_narrative_score=prev_narrative,
+        historical_baseline=historical_baseline,
     )
 
     debate_context = ""
@@ -214,6 +224,8 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
     themes_raw = llm_output.get("risk_themes", [])
     risk_themes = []
     for i, t in enumerate(themes_raw[:5]):
+        if not isinstance(t, dict):
+            continue
         risk_themes.append(RiskTheme(
             theme_id=t.get("theme_id", f"theme_{i+1}"),
             name=t.get("name", f"Risk Theme {i+1}"),
@@ -262,6 +274,8 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
     anomaly_raw = llm_output.get("anomaly_flags", [])
     anomaly_flags = []
     for a in anomaly_raw[:5]:
+        if not isinstance(a, dict):
+            continue
         anomaly_flags.append(AnomalyFlag(
             flag_id=a.get("flag_id", "anomaly"),
             description=a.get("description", ""),
@@ -298,7 +312,18 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
 
 
 def _get_previous_narrative_score(state: VigilState) -> float | None:
-    """Look up the previous narrative score from fingerprint history for sentiment flip detection."""
+    """Look up the previous narrative baseline for sentiment flip detection.
+
+    Uses sector_baseline as a proxy since per-dimension history is not yet
+    tracked.  Returns None when no historical data exists.
+    """
+    if not state.fingerprint or state.fingerprint.sector_baseline is None:
+        return None
+    return state.fingerprint.sector_baseline
+
+
+def _get_historical_baseline(state: VigilState) -> float | None:
+    """Get historical average score for shrinkage toward sector norm."""
     if not state.fingerprint or state.fingerprint.historical_avg_score is None:
         return None
     return state.fingerprint.historical_avg_score

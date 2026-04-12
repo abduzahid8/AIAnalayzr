@@ -1,213 +1,151 @@
-The Core Architecture {1}: of the Vigil platform is defined by its Multi-Agent Relay, a design pattern where specialized AI agents operate in a high-speed, synchronized sequence to transform raw data into executive strategy. Unlike a single-model chatbot, Vigil uses a "divide and conquer" approach to risk assessment.
+# Vigil — Architecture & Logic Reference
 
-Here is the detailed breakdown of how the architecture is structured and how the relay functions:
-1. The Orchestration Layer (The "Brain")
+> **Source of truth**: This document reflects the actual `vigil/` codebase (v4.0).
+> Last synced: 2026-04-12
 
-The architecture starts with the Orchestrator, which acts as the system's "Lead Project Manager."
+---
 
-    Intent-Based Routing: When a user provides a company profile (e.g., "A Series B fintech startup in Southeast Asia"), the Orchestrator classifies the intent and determines the specific "risk vectors" required.
+## 1. Core Architecture: Multi-Agent DAG Pipeline
 
-    Task Decomposition: It breaks the high-level request into sub-tasks for the specialized agents.
+Vigil uses a **Directed Acyclic Graph (DAG) pipeline** where 9 specialized stages transform raw data into executive strategy. Unlike a single-model chatbot, the system divides risk assessment across purpose-built agents coordinated by a procedural orchestrator in `main.py`.
 
-    Model Selection: It dynamically chooses between Claude 4.6 Opus (for high-reasoning synthesis) and Claude 4.6 Sonnet (for rapid data extraction) via the AIML API.
+### Pipeline Stages
 
-2. The Specialized Agent Relay (The "Workers")
+| # | Stage | Role | Execution |
+|---|-------|------|-----------|
+| 1 | **Data Ingestion** | Fetches live market data, news, EDGAR filings, Reddit sentiment | Parallel (`asyncio.gather`) |
+| 2 | **Signal Harvester** | Ingests numeric volatility data (VIX, S&P 500, sector ETFs) | Parallel Tier 1 |
+| 3 | **Narrative Intel** | Scans news headlines and social sentiment for qualitative shifts | Parallel Tier 1 |
+| 4 | **Macro Watchdog** | Layers in interest rates, CPI, yield curves, geopolitical triggers | Parallel Tier 1 |
+| 5 | **Competitive Intel** | Analyzes competitor volatility and sector benchmarks | Parallel Tier 1 |
+| 6 | **Agent Debate** | Cross-validates disagreements between Tier 1 agents | Sequential |
+| 7 | **Market Oracle** | Correlates cross-agent data into a macro/market trajectory | Sequential Tier 2 |
+| 8 | **Risk Synthesizer** | Computes final 0–100 risk score with adaptive Bayesian formula | Sequential Tier 2 |
+| 9 | **Strategy Commander** | Generates 30-day action playbook, scenarios, and signal feed | Sequential Tier 3 |
 
-The 8 agents work in a specific sequence, where each agent's output enriches the "Global State" (Blackboard) for the next.
-Agent	Function	Relay Role
-1. Orchestrator	Dispatcher	Initializes the session and routes the first tasks.
-2. Signal Harvester	Data Ingestion	Ingests live numeric data (VIX, S&P 500, sector ETFs).
-3. Narrative Intel	Sentiment Analysis	Scans news headlines/FUD to detect qualitative shifts.
-4. Macro Watchdog	Economic Context	Layers in interest rates, CPI, and geopolitical triggers.
-5. Competitive Intel	Peer Benchmarking	Analyzes competitor volatility and market position.
-6. Market Oracle	Predictive Modeling	Compares current signals against historical crash signatures.
-7. Risk Synthesizer	Logic Gate	Correlates all data to calculate the 0-100 Risk Score.
-8. Strategy Commander	Action Generator	Transforms the risk score into the 30-day playbook.
-3. Shared State & Persistent Memory
+Additional layers: **Red Team** (adversarial challenge), **Anomaly Detection**, **Validation** (quality assurance).
 
-The "Multi-Agent Relay" is made possible by the complete.dev environment, which solves the problem of "context loss."
+### Execution Model
 
-    Persistent Workspace: Instead of passing massive text blocks back and forth (which would hit token limits), the agents work in a Shared Workspace.
+- **Tier 1**: Agents 2–5 run in parallel via `asyncio.gather`
+- **Debate & Red Team**: Sequential cross-validation after Tier 1
+- **Tier 2**: Market Oracle → Risk Synthesizer (sequential)
+- **Tier 3**: Strategy Commander (sequential)
 
-    Global Blackboard: When the Signal Harvester finds a spike in the VIX, it writes that value to a shared state file. The Market Oracle later reads that specific file to inform its prediction.
+### Shared State
 
-    State Recovery: Because the backend is built on FastAPI with session persistence, if the "Strategy Commander" fails at the final step, the system doesn't restart; it resumes exactly where it left off using the saved state.
+Agents communicate through a **`VigilState` blackboard** persisted in Redis with session-based TTL. Each agent reads from and writes to this shared state object — no file-based workspace.
 
-4. Data Flow: From Raw Signal to Strategy
+### LLM Backend
 
-    Ingestion: Agents 2, 3, and 4 pull raw data from external APIs (Alpha Vantage, FRED, NewsAPI).
+All agents use a single **OpenAI-compatible endpoint** configured via `AIML_API_KEY` and `AIML_BASE_URL` (default: `gpt-4o` via AIML API). There is no multi-model routing.
 
-    Analysis: Agents 5 and 6 process the raw data into "Insights."
+---
 
-    Synthesis: Agent 7 (The Risk Synthesizer) acts as a Bayesian Logic Gate, ensuring that a "High VIX" signal is only flagged as a "Red Tier" risk if it correlates with "Negative Narrative Sentiment."
+## 2. Data Sources
 
-    Executive Output: Agent 8 takes the synthesized risk and uses Claude Opus 4.6’s high-order reasoning to write a human-readable 30-day playbook.
+| Source | Provider | Fallback Chain |
+|--------|----------|----------------|
+| Market data (VIX, S&P 500, sector ETFs) | Alpha Vantage → FRED → Stooq | Graceful degradation |
+| Treasury yields & FX rates | FRED | Optional |
+| News & sentiment | NewsAPI | Cache with Redis |
+| SEC filings | EDGAR full-text search | Optional |
+| Social sentiment | Reddit API | Optional |
 
-Technical Summary
+All sources are fetched in parallel by `services/data_aggregator.py`. Missing sources reduce `data_quality` but do not block the pipeline.
 
-    Total Generation Time: ~90 Seconds.
+---
 
-    Communication Protocol: JSON-based state exchange.
+## 3. Scoring & Tier Logic
 
-    Safety Logic: The Orchestrator includes "Circuit Breakers" that stop the relay if any agent detects critical misinformation or data gaps.
+### Adaptive Weighted Scoring
 
+The Risk Synthesizer uses `core/scoring.py`'s `adaptive_weighted_score()`:
 
+```
+FinalScore = clamp(0, 100, RawScore × DisagreementFactor + ThresholdPremium)
 
+RawScore = M × w_market + Mc × w_macro + N × w_narrative + C × w_competitive
+```
 
+When historical data is available, the final score is shrunk 15% toward the sector baseline to reduce variance.
 
-// 2 Logic Breakdown
+### Sector-Specific Weights
 
-The Logic Breakdown of Vigil is designed as a sequential intelligence relay. Instead of one AI trying to do everything, the system breaks "Risk" into eight distinct logical dimensions.
+Weights adapt based on company sector (sums to 1.0):
 
-Here is how the system processes a company profile from raw data to a 30-day strategic playbook:
-1. The Orchestration Logic (The "Brain")
+| Sector | Market | Macro | Narrative | Competitive |
+|--------|--------|-------|-----------|-------------|
+| Default | 0.35 | 0.25 | 0.20 | 0.20 |
+| Fintech | 0.25 | 0.35 | 0.20 | 0.20 |
+| Technology | 0.30 | 0.15 | 0.25 | 0.30 |
+| Crypto | 0.40 | 0.20 | 0.25 | 0.15 |
 
-The Orchestrator is the "Agent 0." Its primary logic is Intent-Based Routing.
+Weights are further adjusted by VIX regime and agent confidence levels.
 
-    Context Injection: It takes your specific company profile (e.g., "SaaS startup, $2M ARR, focused on the EU market") and "tags" the message with relevant metadata.
+### Disagreement Factor
 
-    Routing Decision: If the market is experiencing a sudden crash (high VIX), the Orchestrator prioritizes the Market Oracle and Signal Harvester. if the risk is regulatory, it shifts weight to Macro Watchdog.
+Measures inter-agent score dispersion. High disagreement (spread > 10 points) amplifies the score via a log-based formula, capped at 1.5×.
 
-    Session Persistence: Using the complete.dev environment, the Orchestrator maintains a "Global State" so that Agent 8 knows exactly what Agent 1 discovered without re-reading the entire transcript.
+### Circuit Breakers (Threshold Triggers)
 
-2. The Analytical Agents (The "Silos")
+| Trigger | Condition | Effect |
+|---------|-----------|--------|
+| VIX Spike | VIX > 30 | +15 point volatility premium |
+| Sentiment Flip | Narrative score moves >30 points from previous | 1.3× multiplier on raw score |
+| Yield Inversion | 2y-10y spread < 0 | +10 point premium |
+| Macro-Market Divergence | Gap > 25 points | +15% of gap as premium |
 
-Each agent has a specific Logic Gate it must clear:
+### Risk Tiers
 
-    Signal Harvester (Quantitative Logic): Ingests numeric data (VIX, S&P 500, Sector ETFs). Its logic is purely mathematical: Is current volatility exceeding the 30-day moving average?
+| Tier | Score Range | Operational State |
+|------|-------------|-------------------|
+| **GREEN** | 0–25 | Growth & Expansion |
+| **YELLOW** | 26–45 | Watchful Monitoring |
+| **ORANGE** | 46–65 | Defensive Hedging |
+| **RED** | 66–85 | Crisis Management |
+| **CRITICAL** | 86–100 | Immediate Intervention |
 
-    Narrative Intel (Qualitative Logic): Scans news headlines and social sentiment. Its logic is semantic: Are people talking about "recession" or "innovation"? It assigns a sentiment polarity score from -1 to +1.
+### LLM Qualitative Adjustment
 
-    Macro Watchdog (Contextual Logic): Looks at interest rates, inflation data, and geopolitical triggers. Its logic is global: How do external economic shifts impact this specific company's burn rate or runway?
+After the mathematical score is computed, the Risk Synthesizer LLM may apply a qualitative adjustment of ±5 points for edge cases the formula cannot capture.
 
-    Competitive Intel (Relational Logic): Benchmarks the company against its sector. Its logic is comparative: Is the competitor’s volatility lower than ours? Why?
+---
 
-3. The Synthesis Engine (The "Decision Logic")
+## 4. Output Structure
 
-This is where the platform moves from "data" to "intelligence."
+Each analysis produces:
 
-    Market Oracle (Predictive Logic): It takes the outputs of the first four agents and runs a "Probability Tree." It asks: "Given the current VIX (Signal) and the negative sentiment (Narrative), what is the 10-day likelihood of a sector-wide correction?"
+- **Risk Score** (0–100) with confidence interval
+- **Risk Tier** (GREEN → CRITICAL)
+- **3–5 Named Risk Themes** ordered by severity with cascade relationships
+- **3 Stress Scenarios** (market shock, company-specific, regulatory)
+- **3-Scenario Model** (best/base/worst case with probabilities)
+- **3–5 Strategic Actions** with ISO-8601 deadlines within 30 days
+- **Signal Feed** (4–6 real-time market indicators)
+- **Executive Summary** and headline
 
-    Risk Synthesizer (Mathematical Logic): This agent calculates the 0-100 Risk Score. It uses a weighted formula:
-    RiskScore=(Market×0.3)+(Narrative×0.2)+(Macro×0.25)+(Comp×0.25)
+### Typical Pipeline Duration
 
-    It then assigns the Tier Color:
+~60–120 seconds depending on LLM latency and data source availability. The pipeline measures and reports actual `pipeline_duration_seconds`.
 
-        GREEN (0-25): Operational as usual.
+---
 
-        YELLOW (26-50): Increased noise; monitor daily.
+## 5. Pain Points Addressed
 
-        ORANGE (51-75): Structural risk identified; hedge positions.
+| Pain | Solution | Outcome |
+|------|----------|---------|
+| Data fatigue (information overload) | Signal Harvester + Narrative Intel filter relevant signals | Clarity & Focus |
+| Slow reporting (reaction gap) | 9-stage pipeline with live data in ~90 seconds | Real-time Agility |
+| Siloed intelligence (contextual blindness) | Risk Synthesizer cross-correlates all vectors via Debate layer | Holistic Vision |
+| Execution gap (analysis paralysis) | Strategy Commander produces 30-day playbook with hard deadlines | Immediate Action |
 
-        RED (76-100): Critical threat; immediate defensive action required.
+---
 
-4. The Executive Output (The "Action Logic")
+## 6. Tech Stack
 
-The Strategy Commander is the final logic gate. It converts abstract risks into concrete tasks.
-
-    Task Prioritization: It filters all identified risks to find the "Top 3" based on the highest probability of impact.
-
-    Deadline Logic: It assigns deadlines based on the "Risk Velocity." A "Red" risk might have a 24-hour deadline, while a "Yellow" risk has a 14-day deadline.
-
-    The 30-Day Playbook: This is a chronological roadmap. It breaks the strategy into:
-
-        Days 1-7: Mitigation & Defense.
-
-        Days 8-21: Stabilization & Monitoring.
-
-        Days 22-30: Long-term Strategic Realignment.
-
-Technical Logic (FastAPI + Claude)
-
-    Asynchronous Relay: While the agents work "in sequence," the system uses FastAPI to pre-fetch market data via the Signal Harvester while the Orchestrator is still processing the user's intent, achieving the 90-second report time.
-
-    Claude Opus 4.6 Reasoning: The system uses Opus for the Synthesizer and Commander because those steps require "high-order logic"—the ability to understand that a high VIX might actually be an opportunity for certain types of companies, rather than just a risk.
-
-// 3 The Scoring & Tier Logic 
-
-
-The Scoring & Tier Logic of Vigil is what transforms raw, fragmented data into a single, high-conviction decision metric. It does not rely on simple averages; instead, it uses a Weighted Synthesis Model that prioritizes hard market data while using qualitative sentiment as a "multiplier."
-
-Here is the detailed breakdown of how Vigil calculates its 0–100 score and assigns the risk tiers.
-1. The Scoring Formula: Weighted Bayesian Synthesis
-
-The Risk Synthesizer Agent uses a mathematical framework to aggregate inputs from the upstream agents. The logic is grounded in a weighted formula where different "risk vectors" have different levels of influence:
-TotalRiskScore=(M⋅0.35)+(Mc⋅0.25)+(N⋅0.20)+(C⋅0.20)
-
-    M (Market Signal): Numeric volatility (VIX, S&P 500, Sector ETFs).
-
-    Mc (Macro Watchdog): High-level economic indicators (Fed rates, CPI, geopolitical triggers).
-
-    N (Narrative Intel): Sentiment polarity from news and earnings calls (-1 to +1).
-
-    C (Competitive Intel): Benchmark variance against industry rivals.
-
-The "Confidence Multiplier" (Cm​)
-
-A unique feature of Vigil’s logic is that it adjusts the final score based on Agent Consensus. If the Signal Harvester shows high volatility but Narrative Intel shows positive news, the system calculates an Entropy Factor. High entropy (disagreement) reduces the confidence of the score, which can shift the Tier to a "Cautionary" state regardless of the raw number.
-2. The Risk Tiers (Color Logic)
-
-The final 0–100 score is mapped to a four-tier visual system. Each tier triggers a different "operational mode" for the Strategy Commander agent.
-Tier	Score Range	Logic Criteria	Operational State
-GREEN	0 – 25	All signals within standard deviations. Positive sentiment.	Growth & Expansion: Strategy focuses on aggressive scaling.
-YELLOW	26 – 50	Market noise detected or minor sectoral shifts.	Watchful Waiting: Strategy focuses on localized monitoring.
-ORANGE	51 – 75	Correlation between Market and Macro risks. Sectoral contagion.	Defensive Hedging: Strategy focuses on liquidity preservation.
-RED	76 – 100	Market, Macro, and Narrative risks all align (High Convergence).	Crisis Management: Strategy focuses on "Survival & Pivot."
-3. Threshold Triggers: How a Score "Jumps"
-
-The logic is not linear. Certain "Critical Triggers" can cause a score to jump tiers instantly:
-
-    The VIX Spike: If the VIX exceeds 30, the system automatically adds a +20 point "Volatility Premium" to the score.
-
-    Sentiment Flip: If the Narrative Intel agent detects a "Sudden Negative Shift" (e.g., a massive geopolitical event), it acts as a 1.5× Multiplier on the existing score.
-
-    Macro Divergence: If the Macro Watchdog detects an interest rate hike that conflicts with the company's current burn rate (from the Profile Data), the risk score is elevated to ORANGE regardless of market stability.
-
-
-
-// 4
-igil was specifically engineered to address the critical friction points found in institutional and startup-level risk management. While traditional risk assessments are often slow, subjective, and backward-looking, Vigil targets four distinct "pains" that prevent leaders from making fast, data-backed decisions.
-1. The "Data Fatigue" Pain (Information Overload)
-
-Financial analysts are currently drowning in "High-Velocity Noise." Between live tickers (VIX, S&P 500), sector-specific ETFs, and a 24/7 news cycle, the human brain cannot correlate these signals in real-time.
-
-    The Problem: Analysts spend 80% of their time gathering data and only 20% analyzing it. By the time the data is "cleaned," the market has already moved.
-
-    The Vigil Solution: The Signal Harvester and Narrative Intel agents automate the "grunt work." They ingest thousands of data points and news headlines per minute, filtering out the noise to present only the correlations that actually impact the company's specific profile.
-
-2. The "Latency" Pain (The Reaction Gap)
-
-In high-volatility environments, a risk report that is 24 hours old is functionally useless.
-
-    The Problem: Traditional "Quarterly Risk Assessments" are static snapshots. They fail to account for "Flash Crashes" or sudden geopolitical shifts (e.g., a sudden interest rate announcement or a viral news story).
-
-    The Vigil Solution: By using Live Market Data synthesized through an 8-agent chain, Vigil provides a dynamic "Risk Score (0-100)" that updates as market conditions change. It shifts the company from a reactive stance (fixing damage) to a proactive stance (hedging before the hit).
-
-3. The "Siloed Intelligence" Pain (Contextual Blindness)
-
-Usually, a company has a "Macro" expert, a "Market" analyst, and a "Competitive" researcher. These three people rarely synthesize their findings into a single coherent truth.
-
-    The Problem: A "Macro" risk (like rising inflation) might be mitigated by a "Competitive" advantage, but if the data is siloed, the executive sees two separate problems instead of one integrated solution.
-
-    The Vigil Solution: The Risk Synthesizer agent acts as a "logic bridge." It forces data from the Macro Watchdog, Market Oracle, and Competitive Intel into a single weighted score. This creates a Unified Truth that accounts for how different risks amplify or cancel each other out.
-
-4. The "Execution Gap" Pain (Analysis Paralysis)
-
-The most common pain for CEOs is receiving a 50-page risk report and asking, "So, what do I actually do on Monday morning?"
-
-    The Problem: Most risk tools provide "Insights" (data descriptions) but fail to provide "Intelligence" (decision support). This leads to Decision Paralysis.
-
-    The Vigil Solution: Vigil is built to be "Action-First." It doesn't just describe a risk; the Strategy Commander agent generates:
-
-        Top 3 Risks ranked by mathematical probability.
-
-        Top 3 Actions with hard deadlines.
-
-        A 30-Day Strategic Playbook that maps out operational survival and growth.
-
-Summary of Value Proposition
-Pain Point	Vigil Solution	Outcome
-Too much noise	Signal Harvester filters relevant tickers.	Clarity & Focus
-Slow reporting	FastAPI + 8-Agent 90-second processing.	Real-time Agility
-Siloed data	Risk Synthesizer cross-correlates vectors.	Holistic Vision
-Indecision	Strategy Commander gives a 30-day playbook.	Immediate Action
+- **Backend**: FastAPI (Python 3.12), async pipeline, Redis state persistence
+- **LLM**: OpenAI-compatible endpoint (configurable model)
+- **Client**: Expo React Native (iOS/Android) + legacy static HTML
+- **Data**: Alpha Vantage, FRED, Stooq, NewsAPI, EDGAR, Reddit
+- **Deploy**: Vercel (serverless) or any Python host

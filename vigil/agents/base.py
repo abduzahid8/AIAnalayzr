@@ -18,6 +18,8 @@ import json
 import logging
 from typing import Any
 
+import re
+
 from vigil.core.config import settings
 from vigil.core.state import AgentConfidence, ReasoningTrace
 from vigil.services.llm import llm_json, llm_complete
@@ -26,6 +28,24 @@ logger = logging.getLogger("vigil.agents.base")
 
 SELF_CORRECTION_THRESHOLD = 0.4
 MAX_RETRIES = 1
+
+_TAG_RE = re.compile(r"<[^>]{1,50}>")
+_INJECTION_PHRASES = re.compile(
+    r"(ignore\s+(all\s+)?(previous\s+)?instructions|system\s*:|<\s*/?\s*system\s*>)",
+    re.IGNORECASE,
+)
+
+
+def sanitize_input(text: str, max_length: int = 2000) -> str:
+    """Sanitize user-provided text before embedding in LLM prompts.
+
+    Strips XML-like tags that could confuse XML-tagged prompt structure
+    and neutralizes common prompt injection patterns.
+    """
+    text = text[:max_length]
+    text = _TAG_RE.sub("", text)
+    text = _INJECTION_PHRASES.sub("[filtered]", text)
+    return text.strip()
 
 
 VERIFICATION_PROMPT = """\

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
@@ -42,8 +43,6 @@ class PipelineStage(str, Enum):
     RED_TEAM_DONE = "RED_TEAM_DONE"
     TIER2_RUNNING = "TIER2_RUNNING"
     TIER2_DONE = "TIER2_DONE"
-    STRESS_TEST_RUNNING = "STRESS_TEST_RUNNING"
-    STRESS_TEST_DONE = "STRESS_TEST_DONE"
     VALIDATION_RUNNING = "VALIDATION_RUNNING"
     VALIDATION_DONE = "VALIDATION_DONE"
     TIER3_RUNNING = "TIER3_RUNNING"
@@ -245,7 +244,26 @@ class ValidationResult(BaseModel):
     score_adjustment: float = 0.0
     grounding_issues: list[str] = Field(default_factory=list)
     logic_issues: list[str] = Field(default_factory=list)
+    missed_risks: list[str] = Field(default_factory=list)
     validation_summary: str = ""
+
+
+class RedTeamVulnerability(BaseModel):
+    """A single vulnerability found by the red team adversarial layer."""
+    attack: str = ""
+    finding: str = ""
+    severity: str = "minor"  # "critical" | "significant" | "minor"
+    counter_evidence: str = ""
+    score_impact_estimate: float = 0.0
+
+
+class RedTeamResult(BaseModel):
+    """Output of the adversarial red team challenge protocol."""
+    vulnerabilities: list[RedTeamVulnerability] = Field(default_factory=list)
+    counter_narrative: str = ""
+    weakest_agent: str = ""
+    robustness_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    recommendation: str = ""
 
 
 class ChatMessage(BaseModel):
@@ -296,7 +314,7 @@ class VigilState(BaseModel):
 
     # Reasoning audit trail
     reasoning_traces: list[ReasoningTrace] = Field(default_factory=list)
-    red_team_result: dict[str, Any] | None = None
+    red_team_result: RedTeamResult | None = None
 
     # Metadata
     data_quality: str = "sparse"
@@ -309,7 +327,50 @@ class VigilState(BaseModel):
 # ── Redis-backed persistence ─────────────────────────────────────────
 
 _pool: aioredis.Redis | None = None
-_memory_store: dict[str, str] = {}
+
+MEMORY_STORE_MAX_SIZE = 200
+MEMORY_STORE_DEFAULT_TTL = 3600
+
+
+class _TTLMemoryStore:
+    """Bounded in-memory fallback with TTL eviction.
+
+    Prevents unbounded growth when Redis is unavailable.
+    """
+
+    def __init__(self, max_size: int = MEMORY_STORE_MAX_SIZE):
+        self._store: dict[str, tuple[str, float]] = {}  # key -> (payload, expires_at)
+        self._max_size = max_size
+
+    def get(self, key: str) -> str | None:
+        entry = self._store.get(key)
+        if entry is None:
+            return None
+        payload, expires_at = entry
+        if time.monotonic() > expires_at:
+            del self._store[key]
+            return None
+        return payload
+
+    def set(self, key: str, payload: str, ttl: int = MEMORY_STORE_DEFAULT_TTL) -> None:
+        if len(self._store) >= self._max_size:
+            self._evict()
+        self._store[key] = (payload, time.monotonic() + ttl)
+
+    def delete(self, key: str) -> None:
+        self._store.pop(key, None)
+
+    def _evict(self) -> None:
+        now = time.monotonic()
+        expired = [k for k, (_, exp) in self._store.items() if now > exp]
+        for k in expired:
+            del self._store[k]
+        if len(self._store) >= self._max_size:
+            oldest_key = min(self._store, key=lambda k: self._store[k][1])
+            del self._store[oldest_key]
+
+
+_memory_store = _TTLMemoryStore()
 
 
 async def _get_redis() -> aioredis.Redis:
@@ -341,7 +402,7 @@ async def save_state(state: VigilState, ttl: int = 3600) -> None:
         await r.set(_key(state.session_id), payload, ex=ttl)
     except Exception as exc:
         logger.warning("Redis save failed, using in-memory state store: %s", exc)
-        _memory_store[state.session_id] = payload
+        _memory_store.set(state.session_id, payload, ttl)
 
 
 async def load_state(session_id: str) -> VigilState | None:
@@ -354,11 +415,15 @@ async def load_state(session_id: str) -> VigilState | None:
         raw = _memory_store.get(session_id)
     if raw is None:
         return None
-    return VigilState.model_validate_json(raw)
+    try:
+        return VigilState.model_validate_json(raw)
+    except Exception as exc:
+        logger.error("Corrupt session data for %s: %s", session_id, exc)
+        return None
 
 
 async def delete_state(session_id: str) -> None:
-    _memory_store.pop(session_id, None)
+    _memory_store.delete(session_id)
     try:
         r = await _get_redis()
         await r.delete(_key(session_id))

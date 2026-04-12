@@ -7,7 +7,6 @@ client/.expo/
 client/dist/
 mobile/node_modules/
 
-# Proprietary prompts – keep private in production deployments
-# Uncomment the line below to prevent prompts from being committed:
-# prompts/*.txt
+# Proprietary prompts – keep private
+prompts/*.txt
 .vercel

@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import math
 from statistics import mean, pstdev
+from typing import Any
 
 from vigil.core.state import VigilState
 
@@ -226,7 +227,7 @@ def _detect_lead_signal(
 def _compute_consensus_strength(
     vals: list[float],
     confidences: dict[str, float],
-) -> dict[str, any]:
+) -> dict[str, Any]:
     """Measure how strong the consensus is, if any."""
     if len(vals) < 2:
         return {"level": "insufficient_data", "score": 0}

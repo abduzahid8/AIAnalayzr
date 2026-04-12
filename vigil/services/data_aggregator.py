@@ -8,13 +8,10 @@ data is available.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
-
-import redis.asyncio as aioredis
 
 from vigil.core.config import settings
 from vigil.core.state import CompanyProfile

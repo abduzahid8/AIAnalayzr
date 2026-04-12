@@ -12,7 +12,7 @@ import {
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 
 import { useVigil } from '@/src/context/VigilContext';
-import { colors, getTierColor } from '@/src/theme';
+import { colors, fonts, getTierColor } from '@/src/theme';
 
 const SUGGESTED_QUESTIONS = [
   'What should I do first this week?',
@@ -50,13 +50,13 @@ export default function AdvisorScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
       <ScrollView ref={scrollRef} contentContainerStyle={s.content}>
-        {/* ── Session Header ───────────────────────────────────────── */}
         {analysis ? (
           <>
             <View style={s.sessionCard}>
+              <View style={s.goldRule} />
               <View style={s.sessionTop}>
                 <View style={s.sessionIconWrap}>
-                  <FontAwesome name="comments-o" size={20} color={colors.accent} />
+                  <FontAwesome name="comments-o" size={18} color={colors.gold} />
                 </View>
                 <View style={s.sessionInfo}>
                   <Text style={s.sessionEyebrow}>STRATEGIC ADVISOR</Text>
@@ -71,70 +71,50 @@ export default function AdvisorScreen() {
               <Text style={s.sessionSummary}>{analysis.executive_summary}</Text>
               <View style={s.sessionMeta}>
                 <View style={s.sessionPill}>
-                  <FontAwesome name="line-chart" size={10} color={colors.textMuted} />
                   <Text style={s.sessionPillText}>{analysis.market_mode}</Text>
                 </View>
                 <View style={s.sessionPill}>
-                  <FontAwesome name="calendar" size={10} color={colors.textMuted} />
                   <Text style={s.sessionPillText}>{analysis.planning_window || '~30 days'}</Text>
                 </View>
               </View>
             </View>
+
             <View style={s.contextCard}>
-              <Text style={s.contextEyebrow}>SESSION SNAPSHOT</Text>
-              <Text style={s.contextTitle}>What the advisor is allowed to use</Text>
+              <Text style={s.contextEyebrow}>SESSION CONTEXT</Text>
               <Text style={s.contextBody}>
-                Answers are grounded in the same JSON payload you reviewed on Analyze: headline score
-                and tier, executive summary, risk themes, cascades, stress tests, and the latest signal
-                feed. It does not invent new market prices.
-              </Text>
-              <Text style={s.contextBullet}>
-                • Session id {analysis.session_id.slice(0, 8)}… ties this chat to that exact run.
-              </Text>
-              <Text style={s.contextBullet}>
-                • Confidence band{' '}
-                {(analysis.confidence_interval ?? [analysis.risk_score, analysis.risk_score])
-                  .map((n) => n.toFixed(1))
-                  .join(' – ')}{' '}
-                — ask the advisor how to tighten controls when the band is wide.
-              </Text>
-              <Text style={s.contextBullet}>
-                • Entropy {analysis.entropy_factor?.toFixed(3) ?? '—'} / divergence{' '}
-                {analysis.divergence_index?.toFixed(3) ?? '—'} — use these when you need a story
-                about conflicting data.
+                Answers are grounded in the analysis snapshot — headline score, themes, cascades,
+                stress tests, and the signal feed. Session {analysis.session_id.slice(0, 8)}…
               </Text>
             </View>
           </>
         ) : (
           <View style={s.emptyCard}>
             <View style={s.emptyIconWrap}>
-              <FontAwesome name="comments-o" size={32} color={colors.textDim} />
+              <FontAwesome name="comments-o" size={28} color={colors.textDim} />
             </View>
             <Text style={s.emptyTitle}>No Active Session</Text>
             <Text style={s.emptyBody}>
               Run a risk analysis on the Analyze tab first. The advisor uses your company profile,
-              risk score, and playbook results to answer strategic questions.
+              risk score, and playbook to answer strategic questions.
             </Text>
             <View style={s.emptyFeatures}>
-              <FeaturePill icon="question-circle" text="Ask strategic questions" />
-              <FeaturePill icon="lightbulb-o" text="Get tailored recommendations" />
-              <FeaturePill icon="shield" text="Explore risk mitigation paths" />
+              <FeaturePill icon="question-circle" text="Strategic questions" />
+              <FeaturePill icon="lightbulb-o" text="Tailored advice" />
+              <FeaturePill icon="shield" text="Mitigation paths" />
             </View>
           </View>
         )}
 
-        {/* ── Error Banner ─────────────────────────────────────────── */}
         {lastError ? (
           <View style={s.errorCard}>
-            <FontAwesome name="exclamation-triangle" size={14} color={colors.accent} />
+            <FontAwesome name="exclamation-triangle" size={13} color={colors.danger} />
             <Text style={s.errorText}>{lastError}</Text>
           </View>
         ) : null}
 
-        {/* ── Suggested Questions ──────────────────────────────────── */}
         {showSuggestions && (
           <View style={s.suggestionsCard}>
-            <Text style={s.suggestionsTitle}>Try asking...</Text>
+            <Text style={s.suggestionsTitle}>TRY ASKING</Text>
             <View style={s.suggestionsGrid}>
               {SUGGESTED_QUESTIONS.map((q) => (
                 <Pressable
@@ -146,14 +126,13 @@ export default function AdvisorScreen() {
                   disabled={isSendingChat}
                 >
                   <Text style={s.suggestionText}>{q}</Text>
-                  <FontAwesome name="arrow-right" size={10} color={colors.accent} />
+                  <FontAwesome name="long-arrow-right" size={10} color={colors.gold} />
                 </Pressable>
               ))}
             </View>
           </View>
         )}
 
-        {/* ── Messages ─────────────────────────────────────────────── */}
         <View style={s.messages}>
           {chatMessages.map((item) => {
             const isUser = item.role === 'user';
@@ -164,14 +143,13 @@ export default function AdvisorScreen() {
               >
                 {!isUser && (
                   <View style={s.bubbleAvatar}>
-                    <FontAwesome name="shield" size={12} color={colors.accent} />
+                    <FontAwesome name="shield" size={11} color={colors.gold} />
                   </View>
                 )}
                 <View style={[s.bubbleContent, isUser ? s.userContent : s.assistantContent]}>
                   <Text style={s.bubbleText}>{item.content}</Text>
                   {item.meta ? (
                     <View style={s.bubbleMetaRow}>
-                      <FontAwesome name="bar-chart" size={10} color={colors.textDim} />
                       <Text style={s.bubbleMeta}>{item.meta}</Text>
                     </View>
                   ) : null}
@@ -183,24 +161,23 @@ export default function AdvisorScreen() {
           {isSendingChat && (
             <View style={[s.bubble, s.assistantBubble]}>
               <View style={s.bubbleAvatar}>
-                <FontAwesome name="shield" size={12} color={colors.accent} />
+                <FontAwesome name="shield" size={11} color={colors.gold} />
               </View>
               <View style={[s.bubbleContent, s.assistantContent]}>
-                <Text style={s.typingDots}>Thinking...</Text>
+                <Text style={s.typingText}>Thinking…</Text>
               </View>
             </View>
           )}
         </View>
       </ScrollView>
 
-      {/* ── Composer ───────────────────────────────────────────────── */}
       <View style={s.composer}>
         <TextInput
           accessibilityLabel="Type your question for the strategic advisor"
           placeholder={
             sessionId
-              ? 'Ask about risks, strategy, timing, hiring, funding...'
-              : 'Run an analysis first to enable the advisor.'
+              ? 'Ask about risks, strategy, timing…'
+              : 'Run an analysis first.'
           }
           placeholderTextColor={colors.textDim}
           style={s.composerInput}
@@ -223,7 +200,7 @@ export default function AdvisorScreen() {
         >
           <FontAwesome
             name={isSendingChat ? 'hourglass-half' : 'paper-plane'}
-            size={16}
+            size={14}
             color={colors.background}
           />
         </Pressable>
@@ -235,7 +212,7 @@ export default function AdvisorScreen() {
 function FeaturePill({ icon, text }: { icon: React.ComponentProps<typeof FontAwesome>['name']; text: string }) {
   return (
     <View style={s.featurePill}>
-      <FontAwesome name={icon} size={12} color={colors.accent} />
+      <FontAwesome name={icon} size={11} color={colors.gold} />
       <Text style={s.featurePillText}>{text}</Text>
     </View>
   );
@@ -250,8 +227,14 @@ const s = StyleSheet.create({
     padding: 16,
     paddingBottom: 200,
     width: '100%',
-    maxWidth: 1080,
+    maxWidth: 960,
     alignSelf: 'center',
+  },
+
+  goldRule: {
+    height: 2,
+    backgroundColor: colors.gold,
+    marginBottom: 8,
   },
 
   // Session Card
@@ -259,7 +242,7 @@ const s = StyleSheet.create({
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 22,
+    borderRadius: 6,
     padding: 20,
     gap: 12,
   },
@@ -269,37 +252,40 @@ const s = StyleSheet.create({
     gap: 12,
   },
   sessionIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.accentMuted,
+    width: 36,
+    height: 36,
+    borderRadius: 4,
+    backgroundColor: colors.goldMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sessionInfo: { flex: 1, gap: 2 },
   sessionEyebrow: {
-    color: colors.accent,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 2,
+    fontFamily: fonts.monoBold,
+    color: colors.gold,
+    fontSize: 9,
+    letterSpacing: 3,
   },
   sessionCompany: {
+    fontFamily: fonts.serif,
     color: colors.text,
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: 20,
   },
   sessionTierBadge: {
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: colors.accentMuted,
+    borderRadius: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: colors.surfaceRaised,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   sessionTierText: {
-    fontSize: 13,
-    fontWeight: '900',
+    fontFamily: fonts.monoBold,
+    fontSize: 12,
   },
   sessionSummary: {
-    color: colors.textMuted,
+    fontFamily: fonts.sans,
+    color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 21,
   },
@@ -309,46 +295,37 @@ const s = StyleSheet.create({
     gap: 8,
   },
   sessionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
   },
   sessionPillText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
+    fontFamily: fonts.mono,
+    color: colors.textSecondary,
+    fontSize: 11,
   },
 
+  // Context
   contextCard: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 18,
-    padding: 18,
+    borderRadius: 6,
+    padding: 16,
     gap: 8,
   },
   contextEyebrow: {
-    color: colors.accent,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 2,
-  },
-  contextTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '800',
+    fontFamily: fonts.monoBold,
+    color: colors.gold,
+    fontSize: 9,
+    letterSpacing: 3,
   },
   contextBody: {
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  contextBullet: {
-    color: colors.textMuted,
+    fontFamily: fonts.sans,
+    color: colors.textDim,
     fontSize: 12,
     lineHeight: 18,
   },
@@ -358,54 +335,55 @@ const s = StyleSheet.create({
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 22,
+    borderRadius: 6,
     padding: 32,
     alignItems: 'center',
     gap: 14,
   },
   emptyIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.surfaceAlt,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.surfaceRaised,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
   },
   emptyTitle: {
+    fontFamily: fonts.serif,
     color: colors.text,
-    fontSize: 20,
-    fontWeight: '900',
+    fontSize: 22,
   },
   emptyBody: {
-    color: colors.textMuted,
+    fontFamily: fonts.sans,
+    color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 21,
     textAlign: 'center',
-    maxWidth: 400,
+    maxWidth: 380,
   },
   emptyFeatures: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
     gap: 8,
-    marginTop: 4,
+    marginTop: 8,
   },
   featurePill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: colors.accentMuted,
-    borderColor: colors.accent,
+    backgroundColor: colors.goldMuted,
+    borderColor: colors.gold,
     borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
   featurePillText: {
-    color: colors.accent,
-    fontSize: 12,
-    fontWeight: '700',
+    fontFamily: fonts.mono,
+    color: colors.gold,
+    fontSize: 11,
   },
 
   // Suggestions
@@ -413,14 +391,15 @@ const s = StyleSheet.create({
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 20,
-    padding: 18,
+    borderRadius: 6,
+    padding: 16,
     gap: 12,
   },
   suggestionsTitle: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: '700',
+    fontFamily: fonts.monoBold,
+    color: colors.textDim,
+    fontSize: 10,
+    letterSpacing: 2,
   },
   suggestionsGrid: {
     flexDirection: 'row',
@@ -431,22 +410,22 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.surfaceRaised,
     borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
+    borderRadius: 4,
+    paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  suggestionChipPressed: { opacity: 0.6, backgroundColor: colors.surfaceAlt },
+  suggestionChipPressed: { opacity: 0.6 },
   suggestionText: {
+    fontFamily: fonts.sans,
     color: colors.text,
     fontSize: 13,
-    fontWeight: '600',
   },
 
   // Messages
-  messages: { gap: 12 },
+  messages: { gap: 14 },
   bubble: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -456,17 +435,17 @@ const s = StyleSheet.create({
   assistantBubble: { alignSelf: 'flex-start' },
   userBubble: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
   bubbleAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.accentMuted,
+    width: 26,
+    height: 26,
+    borderRadius: 4,
+    backgroundColor: colors.goldMuted,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 4,
   },
   bubbleContent: {
     maxWidth: '85%',
-    borderRadius: 18,
+    borderRadius: 6,
     padding: 14,
   },
   assistantContent: {
@@ -475,31 +454,30 @@ const s = StyleSheet.create({
     borderWidth: 1,
   },
   userContent: {
-    backgroundColor: colors.accentMuted,
-    borderColor: 'rgba(0,229,160,0.2)',
+    backgroundColor: colors.goldMuted,
+    borderColor: colors.goldSubtle,
     borderWidth: 1,
   },
   bubbleText: {
+    fontFamily: fonts.sans,
     color: colors.text,
-    fontSize: 15,
+    fontSize: 14,
     lineHeight: 22,
   },
   bubbleMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
     marginTop: 8,
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
   bubbleMeta: {
+    fontFamily: fonts.mono,
     color: colors.textDim,
     fontSize: 11,
-    fontWeight: '700',
   },
-  typingDots: {
-    color: colors.textMuted,
+  typingText: {
+    fontFamily: fonts.sans,
+    color: colors.textSecondary,
     fontSize: 14,
     fontStyle: 'italic',
   },
@@ -516,26 +494,27 @@ const s = StyleSheet.create({
   },
   composerInput: {
     flex: 1,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.surfaceRaised,
     borderColor: colors.border,
-    borderRadius: 18,
+    borderRadius: 4,
     borderWidth: 1,
+    fontFamily: fonts.sans,
     color: colors.text,
-    fontSize: 15,
+    fontSize: 14,
     maxHeight: 120,
     minHeight: 44,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 12,
   },
   sendButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.accent,
+    width: 44,
+    height: 44,
+    borderRadius: 4,
+    backgroundColor: colors.gold,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  buttonDisabled: { opacity: 0.35 },
+  buttonDisabled: { opacity: 0.3 },
   buttonPressed: { opacity: 0.7 },
 
   // Error
@@ -543,15 +522,16 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: colors.surfaceAlt,
-    borderColor: colors.border,
-    borderRadius: 14,
+    backgroundColor: colors.dangerMuted,
+    borderColor: colors.danger,
+    borderRadius: 4,
     borderWidth: 1,
     padding: 14,
   },
   errorText: {
+    fontFamily: fonts.sans,
     color: colors.text,
-    fontSize: 14,
+    fontSize: 13,
     lineHeight: 20,
     flex: 1,
   },

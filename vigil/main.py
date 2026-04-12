@@ -19,6 +19,7 @@ Enhanced pipeline topology (v4.0):
 from __future__ import annotations
 
 import asyncio
+import collections
 import copy
 import json
 import logging
@@ -27,9 +28,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -44,6 +46,7 @@ from vigil.agents import (
     signal_harvester,
     strategy_commander,
 )
+from vigil.agents.base import sanitize_input
 from vigil.agents.debate import run_debate
 from vigil.agents.red_team import run_red_team
 from vigil.agents.validator import run_validation
@@ -70,6 +73,42 @@ logging.basicConfig(
     format="%(asctime)s | %(name)-32s | %(levelname)-7s | %(message)s",
 )
 logger = logging.getLogger("vigil.orchestrator")
+
+
+# ── Authentication ────────────────────────────────────────────────────
+
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(key: str | None = Security(_api_key_header)):
+    """Enforce API key when configured; open access otherwise (dev mode)."""
+    allowed = settings.get_api_keys()
+    if not allowed:
+        return
+    if not key or key not in allowed:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+# ── Rate Limiting (in-process token bucket per IP) ────────────────────
+
+_rate_buckets: dict[str, list[float]] = collections.defaultdict(list)
+
+
+def _check_rate_limit(client_ip: str) -> None:
+    """Simple sliding-window rate limiter for expensive endpoints."""
+    rpm = settings.rate_limit_rpm
+    if rpm <= 0:
+        return
+    now = time.monotonic()
+    window = _rate_buckets[client_ip]
+    cutoff = now - 60.0
+    _rate_buckets[client_ip] = [t for t in window if t > cutoff]
+    if len(_rate_buckets[client_ip]) >= rpm:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded ({rpm} requests/min). Try again shortly.",
+        )
+    _rate_buckets[client_ip].append(now)
 
 
 # ── Lifespan ─────────────────────────────────────────────────────────
@@ -259,13 +298,28 @@ async def _run_agent_safe(
         return state
 
 
-async def run_pipeline(state: VigilState) -> VigilState:
-    """Execute the full enhanced DAG pipeline (v4.0)."""
+ProgressCallback = Any  # Callable[[str, str], Awaitable[None]] | None
+
+
+async def run_pipeline(
+    state: VigilState,
+    progress_cb: ProgressCallback = None,
+) -> VigilState:
+    """Execute the full enhanced DAG pipeline (v4.0).
+
+    Args:
+        progress_cb: optional async callback(stage_name, detail) for SSE streaming.
+    """
     t0 = time.monotonic()
+
+    async def _report(stage: str, detail: str = "") -> None:
+        if progress_cb:
+            await progress_cb(stage, detail)
 
     # ── Pre-flight: Fetch all external data in parallel ──────
     state.stage = PipelineStage.DATA_FETCH
     await save_state(state)
+    await _report("data_fetch", "Fetching market data, news, SEC filings, Reddit…")
     logger.info(">> Pre-flight – fetching all external data sources")
 
     bundle = await fetch_all_data(state.company)
@@ -282,6 +336,7 @@ async def run_pipeline(state: VigilState) -> VigilState:
     # ── Tier 1: Parallel multi-step agents with self-correction ──
     state.stage = PipelineStage.TIER1_RUNNING
     await save_state(state)
+    await _report("tier1", "Running 4 parallel analysis agents…")
     logger.info(">> Tier 1 – launching 4 multi-step agents (with self-correction)")
 
     s1, s2, s3, s4 = await asyncio.gather(
@@ -306,6 +361,7 @@ async def run_pipeline(state: VigilState) -> VigilState:
     # ── Debate: Inter-agent cross-validation ─────────────────
     state.stage = PipelineStage.DEBATE_RUNNING
     await save_state(state)
+    await _report("debate", "Cross-validating agent outputs…")
     logger.info(">> Debate – cross-validating Tier-1 outputs")
     state = await run_debate(state)
     state.stage = PipelineStage.DEBATE_DONE
@@ -315,6 +371,7 @@ async def run_pipeline(state: VigilState) -> VigilState:
     # ── Red Team: Adversarial challenge ──────────────────────
     state.stage = PipelineStage.RED_TEAM_RUNNING
     await save_state(state)
+    await _report("red_team", "Running adversarial challenge…")
     logger.info(">> Red Team – adversarial challenge")
     state = await run_red_team(state, bundle)
     state.stage = PipelineStage.RED_TEAM_DONE
@@ -324,6 +381,7 @@ async def run_pipeline(state: VigilState) -> VigilState:
     # ── Tier 2: Sequential synthesis → scoring ───────────────
     state.stage = PipelineStage.TIER2_RUNNING
     await save_state(state)
+    await _report("tier2", "Synthesizing risk score with cascades and stress tests…")
     logger.info(">> Tier 2 – MarketOracle -> RiskSynthesizer (with cascades + stress)")
     state = await _run_agent_safe(market_oracle.run, state, "MarketOracle", bundle)
     state = await _run_agent_safe(risk_synthesizer.run, state, "RiskSynthesizer", bundle)
@@ -346,6 +404,7 @@ async def run_pipeline(state: VigilState) -> VigilState:
     # ── Validation: Quality assurance layer ───────────────────
     state.stage = PipelineStage.VALIDATION_RUNNING
     await save_state(state)
+    await _report("validation", "Validating output quality…")
     logger.info(">> Validation – checking output quality")
     state = await run_validation(state, bundle)
     state.stage = PipelineStage.VALIDATION_DONE
@@ -355,6 +414,7 @@ async def run_pipeline(state: VigilState) -> VigilState:
     # ── Tier 3: Executive output with scenario model ─────────
     state.stage = PipelineStage.TIER3_RUNNING
     await save_state(state)
+    await _report("tier3", "Generating executive strategy and scenario model…")
     logger.info(">> Tier 3 – StrategyCommander (with 3-scenario model)")
     state = await _run_agent_safe(strategy_commander.run, state, "StrategyCommander", bundle)
     state.stage = PipelineStage.COMPLETE
@@ -454,108 +514,54 @@ def _build_chat_context(state: VigilState) -> str:
         sections.append(f"\nHistorical Context: Similar companies avg score: {state.fingerprint.historical_avg_score:.1f}")
 
     if state.red_team_result:
-        sections.append(f"\nRed Team Robustness: {state.red_team_result.get('robustness_score', 'N/A')}")
-        sections.append(f"Counter-Narrative: {state.red_team_result.get('counter_narrative', 'N/A')}")
+        sections.append(f"\nRed Team Robustness: {state.red_team_result.robustness_score}")
+        sections.append(f"Counter-Narrative: {state.red_team_result.counter_narrative}")
 
     return "\n".join(sections)
 
 
-# ── API Endpoints ────────────────────────────────────────────────────
+# ── Response Builder ──────────────────────────────────────────────────
 
-@app.post("/analyse", response_model=AnalysisResponse, tags=["Analysis"])
-async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
-    """Run the full enhanced risk analysis pipeline for a company."""
-    state = VigilState(
-        company=CompanyProfile(
-            name=req.company_name,
-            ticker=req.ticker,
-            website=req.website,
-            sector=req.sector,
-            subsector=req.subsector,
-            description=req.description,
-            geography=req.geography,
-            country=req.country,
-            operating_in=req.operating_in,
-            arr_range=req.arr_range,
-            funding_stage=req.funding_stage,
-            runway=req.runway,
-            team_size=req.team_size,
-            revenue_currency=req.revenue_currency,
-            risk_exposures=req.risk_exposures,
-            active_regulations=req.active_regulations,
-            risk_tolerance=req.risk_tolerance,
-        )
-    )
-
-    logger.info(
-        "New analysis session %s for '%s'",
-        state.session_id, req.company_name,
-    )
-
-    t0 = time.monotonic()
-    try:
-        state = await run_pipeline(state)
-    except Exception as exc:
-        state.stage = PipelineStage.FAILED
-        state.errors.append(f"Pipeline fatal: {exc!s}")
-        await save_state(state)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
+def _build_analysis_response(
+    req: AnalysisRequest,
+    state: VigilState,
+    risk, strat, oracle,
+    basic_correlations: dict,
+    divergence: float,
+    advanced_corr: dict,
+    temporal_velocity: float | None,
+    temporal_direction: str | None,
+    t0: float,
+) -> AnalysisResponse:
+    """Assemble the full AnalysisResponse from pipeline state."""
     elapsed = time.monotonic() - t0
 
-    risk = state.risk_synthesizer
-    strat = state.strategy_commander
-    oracle = state.market_oracle
-
-    basic_correlations = correlation_engine.compute_correlations(state)
-    divergence = correlation_engine.compute_divergence_index(state)
-    advanced_corr = correlation_engine.compute_advanced_correlations(state)
-
-    # Temporal delta analysis
-    temporal = None
-    temporal_velocity = None
-    temporal_direction = None
-    if risk:
-        temporal = await compute_temporal_delta(
-            state.company.sector,
-            risk.final_score,
-            state.company.geography,
+    risk_themes_resp = [
+        RiskThemeResponse(
+            theme_id=t.theme_id, name=t.name, severity=t.severity,
+            category=t.category, description=t.description,
+            source_agents=t.source_agents,
         )
-        temporal_velocity = temporal.sector_velocity
-        temporal_direction = temporal.sector_direction
+        for t in (risk.risk_themes if risk else [])
+    ]
 
-    risk_themes_resp = []
-    if risk and risk.risk_themes:
-        risk_themes_resp = [
-            RiskThemeResponse(
-                theme_id=t.theme_id, name=t.name, severity=t.severity,
-                category=t.category, description=t.description,
-                source_agents=t.source_agents,
-            )
-            for t in risk.risk_themes
-        ]
+    cascades_resp = [
+        RiskCascadeResponse(
+            trigger_theme=c.trigger_theme, affected_theme=c.affected_theme,
+            cascade_probability=c.cascade_probability, mechanism=c.mechanism,
+            time_horizon=c.time_horizon,
+        )
+        for c in (risk.risk_cascades if risk else [])
+    ]
 
-    cascades_resp = []
-    if risk and risk.risk_cascades:
-        cascades_resp = [
-            RiskCascadeResponse(
-                trigger_theme=c.trigger_theme, affected_theme=c.affected_theme,
-                cascade_probability=c.cascade_probability, mechanism=c.mechanism,
-                time_horizon=c.time_horizon,
-            )
-            for c in risk.risk_cascades
-        ]
-
-    stress_resp = []
-    if risk and risk.stress_scenarios:
-        stress_resp = [
-            StressScenarioResponse(
-                scenario_id=s.scenario_id, name=s.name, trigger=s.trigger,
-                score_impact=s.score_impact, resulting_tier=s.resulting_tier,
-                description=s.description, probability=s.probability,
-            )
-            for s in risk.stress_scenarios
-        ]
+    stress_resp = [
+        StressScenarioResponse(
+            scenario_id=s.scenario_id, name=s.name, trigger=s.trigger,
+            score_impact=s.score_impact, resulting_tier=s.resulting_tier,
+            description=s.description, probability=s.probability,
+        )
+        for s in (risk.stress_scenarios if risk else [])
+    ]
 
     scenario_resp = None
     if strat and strat.scenario_model:
@@ -570,23 +576,15 @@ async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
             expected_value_score=sm.expected_value_score,
         )
 
-    anomaly_flags_resp = []
-    if risk and risk.anomaly_flags:
-        anomaly_flags_resp = [
-            AnomalyFlagResponse(
-                flag_id=a.flag_id, description=a.description, severity=a.severity,
-            )
-            for a in risk.anomaly_flags
-        ]
+    anomaly_flags_resp = [
+        AnomalyFlagResponse(flag_id=a.flag_id, description=a.description, severity=a.severity)
+        for a in (risk.anomaly_flags if risk else [])
+    ]
 
-    signal_feed_resp = []
-    if strat and strat.signal_feed:
-        signal_feed_resp = [
-            SignalFeedItemResponse(
-                label=s.label, delta=s.delta, sentiment=s.sentiment,
-            )
-            for s in strat.signal_feed
-        ]
+    signal_feed_resp = [
+        SignalFeedItemResponse(label=s.label, delta=s.delta, sentiment=s.sentiment)
+        for s in (strat.signal_feed if strat else [])
+    ]
 
     traces_resp = [
         ReasoningTraceResponse(
@@ -622,9 +620,7 @@ async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
         stress_scenarios=stress_resp,
         scenario_model=scenario_resp,
         anomaly_flags=anomaly_flags_resp,
-        strategic_actions=[
-            a.model_dump() for a in (strat.actions if strat else [])
-        ],
+        strategic_actions=[a.model_dump() for a in (strat.actions if strat else [])],
         signal_feed=signal_feed_resp,
         agent_correlations=basic_correlations,
         advanced_correlations=advanced_corr,
@@ -635,32 +631,107 @@ async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
         data_sources=state.data_sources,
         circuit_breakers_triggered=circuit_breakers,
         debate_consensus=(
-            state.debate_result.consensus_score
-            if state.debate_result else None
+            state.debate_result.consensus_score if state.debate_result else None
         ),
         red_team_robustness=(
-            state.red_team_result.get("robustness_score")
-            if state.red_team_result else None
+            state.red_team_result.robustness_score if state.red_team_result else None
         ),
         validation_valid=(
-            state.validation_result.is_valid
-            if state.validation_result else None
+            state.validation_result.is_valid if state.validation_result else None
         ),
         fingerprint_hash=(
-            state.fingerprint.fingerprint_hash
-            if state.fingerprint else None
+            state.fingerprint.fingerprint_hash if state.fingerprint else None
         ),
         historical_avg_score=(
-            state.fingerprint.historical_avg_score
-            if state.fingerprint else None
+            state.fingerprint.historical_avg_score if state.fingerprint else None
         ),
         temporal_velocity=temporal_velocity,
         temporal_direction=temporal_direction,
     )
 
 
+# ── API Endpoints ────────────────────────────────────────────────────
+
+def _build_profile(req: AnalysisRequest) -> CompanyProfile:
+    """Build a sanitized CompanyProfile from the request."""
+    return CompanyProfile(
+        name=sanitize_input(req.company_name, max_length=200),
+        ticker=sanitize_input(req.ticker, max_length=10) if req.ticker else None,
+        website=req.website,
+        sector=sanitize_input(req.sector, max_length=100) if req.sector else None,
+        subsector=sanitize_input(req.subsector, max_length=100) if req.subsector else None,
+        description=sanitize_input(req.description, max_length=2000),
+        geography=sanitize_input(req.geography, max_length=50),
+        country=sanitize_input(req.country, max_length=100),
+        operating_in=req.operating_in,
+        arr_range=req.arr_range,
+        funding_stage=req.funding_stage,
+        runway=req.runway,
+        team_size=req.team_size,
+        revenue_currency=req.revenue_currency,
+        risk_exposures=req.risk_exposures,
+        active_regulations=req.active_regulations,
+        risk_tolerance=req.risk_tolerance,
+    )
+
+
+@app.post("/analyse", response_model=AnalysisResponse, tags=["Analysis"])
+async def analyse_company(
+    req: AnalysisRequest,
+    request: Request,
+    _auth=Security(verify_api_key),
+) -> AnalysisResponse:
+    """Run the full enhanced risk analysis pipeline for a company."""
+    _check_rate_limit(request.client.host if request.client else "unknown")
+
+    state = VigilState(company=_build_profile(req))
+
+    logger.info(
+        "New analysis session %s for '%s'",
+        state.session_id, req.company_name,
+    )
+
+    t0 = time.monotonic()
+    try:
+        state = await run_pipeline(state)
+    except Exception as exc:
+        state.stage = PipelineStage.FAILED
+        state.errors.append(f"Pipeline fatal: {exc!s}")
+        await save_state(state)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    elapsed = time.monotonic() - t0
+
+    risk = state.risk_synthesizer
+    strat = state.strategy_commander
+    oracle = state.market_oracle
+
+    basic_correlations = correlation_engine.compute_correlations(state)
+    divergence = correlation_engine.compute_divergence_index(state)
+    advanced_corr = correlation_engine.compute_advanced_correlations(state)
+
+    temporal_velocity = None
+    temporal_direction = None
+    if risk:
+        temporal = await compute_temporal_delta(
+            state.company.sector, risk.final_score, state.company.geography,
+        )
+        temporal_velocity = temporal.sector_velocity
+        temporal_direction = temporal.sector_direction
+
+    return _build_analysis_response(
+        req, state, risk, strat, oracle,
+        basic_correlations, divergence, advanced_corr,
+        temporal_velocity, temporal_direction,
+        t0,
+    )
+
+
 @app.post("/chat", response_model=ChatResponse, tags=["Chat"])
-async def chat_advisor(req: ChatRequest) -> ChatResponse:
+async def chat_advisor(
+    req: ChatRequest,
+    _auth=Security(verify_api_key),
+) -> ChatResponse:
     """Conversational strategic advisor using the analysis context."""
     state = await load_state(req.session_id)
     if state is None:
@@ -675,10 +746,17 @@ async def chat_advisor(req: ChatRequest) -> ChatResponse:
 
     user_message = f"Conversation so far:{messages_context}\n\n[USER]: {req.message}\n\nProvide your strategic advice."
 
-    reply = await llm_complete(
-        system_prompt, user_message,
-        temperature=0.4, max_tokens=2000,
-    )
+    try:
+        reply = await llm_complete(
+            system_prompt, user_message,
+            temperature=0.4, max_tokens=2000,
+        )
+    except Exception as exc:
+        logger.error("Chat LLM call failed for session %s: %s", req.session_id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="AI advisor is temporarily unavailable. Please try again.",
+        )
 
     state.chat_history.append(ChatMessage(role="user", content=req.message))
     state.chat_history.append(ChatMessage(role="assistant", content=reply))
@@ -764,6 +842,86 @@ async def serve_app_config():
 @app.get("/", include_in_schema=False)
 async def serve_dashboard():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+# ── SSE Streaming Endpoint ────────────────────────────────────────────
+
+PIPELINE_STAGES = [
+    "data_fetch", "tier1", "debate", "red_team",
+    "tier2", "validation", "tier3",
+]
+
+
+@app.post("/analyse/stream", tags=["Analysis"])
+async def analyse_stream(
+    req: AnalysisRequest,
+    request: Request,
+    _auth=Security(verify_api_key),
+):
+    """Run analysis with Server-Sent Events for real-time progress."""
+    _check_rate_limit(request.client.host if request.client else "unknown")
+
+    queue: asyncio.Queue[dict] = asyncio.Queue()
+
+    async def progress_cb(stage: str, detail: str = "") -> None:
+        await queue.put({
+            "type": "progress",
+            "stage": stage,
+            "detail": detail,
+            "total_stages": len(PIPELINE_STAGES),
+            "current_stage": PIPELINE_STAGES.index(stage) + 1 if stage in PIPELINE_STAGES else 0,
+        })
+
+    async def run_in_background():
+        state = VigilState(company=_build_profile(req))
+        try:
+            state = await run_pipeline(state, progress_cb=progress_cb)
+
+            risk = state.risk_synthesizer
+            strat = state.strategy_commander
+            oracle = state.market_oracle
+            basic_correlations = correlation_engine.compute_correlations(state)
+            divergence = correlation_engine.compute_divergence_index(state)
+            advanced_corr = correlation_engine.compute_advanced_correlations(state)
+
+            temporal_velocity = None
+            temporal_direction = None
+            if risk:
+                temporal = await compute_temporal_delta(
+                    state.company.sector, risk.final_score, state.company.geography,
+                )
+                temporal_velocity = temporal.sector_velocity
+                temporal_direction = temporal.sector_direction
+
+            response = _build_analysis_response(
+                req, state, risk, strat, oracle,
+                basic_correlations, divergence, advanced_corr,
+                temporal_velocity, temporal_direction,
+                time.monotonic(),
+            )
+            await queue.put({"type": "complete", "data": response.model_dump()})
+
+        except Exception as exc:
+            logger.error("Streaming pipeline failed: %s", exc, exc_info=True)
+            await queue.put({"type": "error", "detail": str(exc)})
+
+    async def event_generator():
+        task = asyncio.create_task(run_in_background())
+        try:
+            while True:
+                event = await queue.get()
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+                if event.get("type") in ("complete", "error"):
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── Entrypoint ───────────────────────────────────────────────────────

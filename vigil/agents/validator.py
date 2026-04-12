@@ -127,6 +127,7 @@ async def run_validation(state: VigilState, data_bundle: Any = None) -> VigilSta
             score_adjustment=max(-8.0, min(8.0, float(data.get("score_adjustment", 0)))),
             grounding_issues=data.get("grounding_issues", []),
             logic_issues=data.get("logic_issues", []),
+            missed_risks=data.get("missed_risks", []),
             validation_summary=data.get("validation_summary", ""),
         )
 

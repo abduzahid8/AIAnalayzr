@@ -40,8 +40,14 @@ class NewsFeed:
     source: str = "newsapi"
 
 
+_redis_pool: aioredis.Redis | None = None
+
+
 async def _get_redis() -> aioredis.Redis:
-    return aioredis.from_url(settings.get_redis_url(), decode_responses=True)
+    global _redis_pool
+    if _redis_pool is None:
+        _redis_pool = aioredis.from_url(settings.get_redis_url(), decode_responses=True)
+    return _redis_pool
 
 
 async def _cached_get(cache_key: str) -> list[dict] | None:

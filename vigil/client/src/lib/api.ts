@@ -76,6 +76,11 @@ async function request<T>(
   }
 }
 
+export type StreamEvent =
+  | { type: 'progress'; stage: string; detail: string; current_stage: number; total_stages: number }
+  | { type: 'complete'; data: AnalysisResponse }
+  | { type: 'error'; detail: string };
+
 export const vigilApi = {
   apiBaseUrl: API_BASE_URL,
   health() {
@@ -91,6 +96,73 @@ export const vigilApi = {
       },
       TIMEOUTS.analyse,
     );
+  },
+  async analyseStream(
+    payload: AnalysisRequest,
+    onProgress: (event: StreamEvent) => void,
+  ): Promise<AnalysisResponse> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUTS.analyse);
+
+    try {
+      const response = await fetch(buildUrl('/analyse/stream'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        let message = `Request failed with status ${response.status}`;
+        try {
+          const p = (await response.json()) as { detail?: string };
+          if (p.detail) message = p.detail;
+        } catch { /* use generic */ }
+        throw new Error(message);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Streaming not supported');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let result: AnalysisResponse | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6)) as StreamEvent;
+            onProgress(event);
+            if (event.type === 'complete') {
+              result = event.data;
+            }
+            if (event.type === 'error') {
+              throw new Error(event.detail);
+            }
+          } catch (e) {
+            if (e instanceof Error && e.message !== line.slice(6)) throw e;
+          }
+        }
+      }
+
+      if (!result) throw new Error('Stream ended without a result');
+      return result;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error('Analysis stream timed out');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   },
   chat(sessionId: string, message: string) {
     return request<ChatResponse>(

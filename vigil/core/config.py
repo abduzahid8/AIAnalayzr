@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     log_level: str = "info"
     reload: bool = False
 
+    # ── Security ─────────────────────────────────────────────
+    api_keys: str = ""  # comma-separated valid API keys; empty = open access
+    rate_limit_rpm: int = 10  # max /analyse requests per minute per IP
+
     # ── Pipeline feature flags ───────────────────────────────
     agent_verification: bool = True
     debate_layer: bool = True
@@ -95,6 +99,12 @@ class Settings(BaseSettings):
     def get_cors_allow_origin_regex(self) -> str | None:
         value = self.cors_allow_origin_regex.strip()
         return value or None
+
+    def get_api_keys(self) -> set[str]:
+        raw = self.api_keys.strip()
+        if not raw:
+            return set()
+        return {k.strip() for k in raw.split(",") if k.strip()}
 
 
 settings = Settings()

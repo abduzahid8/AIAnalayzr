@@ -306,15 +306,17 @@ input,textarea,select{font-family:inherit}
 <div class="loading-overlay" id="loading">
   <div class="spinner"></div>
   <div class="loading-stage" id="loadingStage">Initializing Pipeline...</div>
-  <div class="loading-text" id="loadingText">8 AI agents are analysing your company</div>
+  <div class="loading-text" id="loadingText">9 AI agents are analysing your company</div>
   <div class="pipeline-steps">
-    <div class="pipeline-step" id="step1" title="Signal Harvester"></div>
-    <div class="pipeline-step" id="step2" title="Narrative Intel"></div>
-    <div class="pipeline-step" id="step3" title="Macro Watchdog"></div>
-    <div class="pipeline-step" id="step4" title="Competitive Intel"></div>
-    <div class="pipeline-step" id="step5" title="Market Oracle"></div>
-    <div class="pipeline-step" id="step6" title="Risk Synthesizer"></div>
-    <div class="pipeline-step" id="step7" title="Strategy Commander"></div>
+    <div class="pipeline-step" id="step1" title="Data Ingestion"></div>
+    <div class="pipeline-step" id="step2" title="Signal Harvester"></div>
+    <div class="pipeline-step" id="step3" title="Narrative Intel"></div>
+    <div class="pipeline-step" id="step4" title="Macro Watchdog"></div>
+    <div class="pipeline-step" id="step5" title="Competitive Intel"></div>
+    <div class="pipeline-step" id="step6" title="Agent Debate"></div>
+    <div class="pipeline-step" id="step7" title="Market Oracle"></div>
+    <div class="pipeline-step" id="step8" title="Risk Synthesizer"></div>
+    <div class="pipeline-step" id="step9" title="Strategy Commander"></div>
   </div>
 </div>
 
@@ -326,7 +328,7 @@ input,textarea,select{font-family:inherit}
   </div>
   <div class="privacy-badges">
     <div class="privacy-badge"><span class="ico">&#9679;</span> No account needed</div>
-    <div class="privacy-badge"><span class="ico">&#128274;</span> Data lives in browser session only</div>
+    <div class="privacy-badge"><span class="ico">&#128274;</span> Data encrypted in transit &amp; auto-expires</div>
     <div class="privacy-badge"><span class="ico">&#9733;</span> More detail = better analysis</div>
   </div>
 
@@ -692,7 +694,7 @@ input,textarea,select{font-family:inherit}
   </div>
 </div>
 
-<div class="footer">Vigil v2.0 · Autonomous Risk Intelligence · 8-Agent DAG Pipeline</div>
+<div class="footer">Vigil v4.0 · Autonomous Risk Intelligence · 9-Stage DAG Pipeline</div>
 
 <script>
 const TIER_COLORS = {GREEN:'#22c55e',YELLOW:'#eab308',ORANGE:'#f97316',RED:'#ef4444',CRITICAL:'#dc2626'};
@@ -840,23 +842,23 @@ function showLoading() {
   document.getElementById('submitBtn').disabled = true;
   let step = 0;
   const stages = [
-    ['Tier 1 — Gathering Intelligence','SignalHarvester, NarrativeIntel, MacroWatchdog, CompetitiveIntel running in parallel'],
-    ['Tier 1 — Gathering Intelligence','Scanning price action & volume anomalies...'],
-    ['Tier 1 — Gathering Intelligence','Analysing media sentiment & narratives...'],
-    ['Tier 1 — Gathering Intelligence','Evaluating macroeconomic indicators...'],
-    ['Tier 1 — Gathering Intelligence','Mapping competitive landscape...'],
+    ['Data Ingestion','Fetching live market data, news, EDGAR filings, Reddit sentiment...'],
+    ['Tier 1 — Gathering Intelligence','SignalHarvester scanning price action & volume anomalies...'],
+    ['Tier 1 — Gathering Intelligence','NarrativeIntel analysing media sentiment & narratives...'],
+    ['Tier 1 — Gathering Intelligence','MacroWatchdog evaluating macroeconomic indicators...'],
+    ['Tier 1 — Gathering Intelligence','CompetitiveIntel mapping competitive landscape...'],
+    ['Cross-Validation','Agent Debate cross-validating findings across agents...'],
     ['Tier 2 — Synthesizing Signals','MarketOracle correlating cross-agent data...'],
-    ['Tier 2 — Computing Risk Score','RiskSynthesizer applying Bayesian formula...'],
-    ['Tier 3 — Crafting Strategy','StrategyCommander building playbook...'],
+    ['Tier 2 — Computing Risk Score','RiskSynthesizer applying adaptive Bayesian scoring...'],
+    ['Tier 3 — Crafting Strategy','StrategyCommander building 30-day playbook...'],
   ];
-  const stepsEl = [1,2,3,4,5,6,7].map(i => document.getElementById('step'+i));
+  const stepsEl = [1,2,3,4,5,6,7,8,9].map(i => document.getElementById('step'+i));
   animInterval = setInterval(() => {
     if (step < stages.length) {
       document.getElementById('loadingStage').textContent = stages[step][0];
       document.getElementById('loadingText').textContent = stages[step][1];
-      const doneCount = step < 4 ? step : step < 5 ? 4 : step < 6 ? 5 : step < 7 ? 6 : 7;
       stepsEl.forEach((s,i) => {
-        s.className = 'pipeline-step' + (i < doneCount ? ' done' : i === doneCount ? ' active' : '');
+        s.className = 'pipeline-step' + (i < step ? ' done' : i === step ? ' active' : '');
       });
       step++;
     }

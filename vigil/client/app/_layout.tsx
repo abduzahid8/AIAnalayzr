@@ -1,4 +1,14 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { DMSerifDisplay_400Regular } from '@expo-google-fonts/dm-serif-display';
+import {
+  JetBrainsMono_400Regular,
+  JetBrainsMono_700Bold,
+} from '@expo-google-fonts/jetbrains-mono';
+import {
+  DMSans_400Regular,
+  DMSans_500Medium,
+  DMSans_700Bold,
+} from '@expo-google-fonts/dm-sans';
 import { ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
@@ -9,24 +19,25 @@ import { StatusBar } from 'expo-status-bar';
 import { VigilProvider } from '@/src/context/VigilContext';
 import { navigationTheme } from '@/src/theme';
 
-export {
-  // Catch any errors thrown by the Layout component.
-  ErrorBoundary,
-} from 'expo-router';
+export { ErrorBoundary } from 'expo-router';
 
 export const unstable_settings = {
   initialRouteName: '(tabs)',
 };
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
     ...FontAwesome.font,
+    DMSerifDisplay_400Regular,
+    JetBrainsMono_400Regular,
+    JetBrainsMono_700Bold,
+    DMSans_400Regular,
+    DMSans_500Medium,
+    DMSans_700Bold,
   });
 
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
     if (error) throw error;
   }, [error]);

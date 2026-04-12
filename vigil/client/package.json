@@ -17,6 +17,9 @@
     "release:ios": "npm run eas:build:ios && npm run eas:submit:ios"
   },
   "dependencies": {
+    "@expo-google-fonts/dm-sans": "^0.4.2",
+    "@expo-google-fonts/dm-serif-display": "^0.4.2",
+    "@expo-google-fonts/jetbrains-mono": "^0.4.1",
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "^3.0.2",
     "@react-navigation/native": "^7.1.8",
