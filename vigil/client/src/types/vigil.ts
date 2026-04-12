@@ -29,6 +29,43 @@ export type RiskTheme = {
   source_agents: string[];
 };
 
+export type RiskCascade = {
+  trigger_theme: string;
+  affected_theme: string;
+  cascade_probability: number;
+  mechanism: string;
+  time_horizon: string;
+};
+
+export type StressScenario = {
+  scenario_id: string;
+  name: string;
+  trigger: string;
+  score_impact: number;
+  resulting_tier: string;
+  description: string;
+  probability: number;
+};
+
+export type ScenarioModel = {
+  best_case: string;
+  best_case_score: number;
+  best_case_probability: number;
+  base_case: string;
+  base_case_score: number;
+  base_case_probability: number;
+  worst_case: string;
+  worst_case_score: number;
+  worst_case_probability: number;
+  expected_value_score: number;
+};
+
+export type AnomalyFlag = {
+  flag_id: string;
+  description: string;
+  severity: string;
+};
+
 export type SignalFeedItem = {
   label: string;
   delta: string;
@@ -40,6 +77,14 @@ export type StrategicAction = {
   description: string;
   deadline?: string | null;
   priority?: string | null;
+};
+
+export type ReasoningTrace = {
+  agent_name: string;
+  steps: string[];
+  was_self_corrected: boolean;
+  verification_issues_count: number;
+  missed_signals: string[];
 };
 
 export type AnalysisResponse = {
@@ -56,11 +101,27 @@ export type AnalysisResponse = {
   planning_window: string;
   market_mode: string;
   risk_themes: RiskTheme[];
+  risk_cascades: RiskCascade[];
+  stress_scenarios: StressScenario[];
+  scenario_model: ScenarioModel | null;
+  anomaly_flags: AnomalyFlag[];
   strategic_actions: StrategicAction[];
   signal_feed: SignalFeedItem[];
   agent_correlations: Record<string, number>;
+  advanced_correlations: Record<string, unknown>;
   divergence_index: number;
+  reasoning_traces: ReasoningTrace[];
   pipeline_duration_seconds: number;
+  data_quality: string;
+  data_sources: string[];
+  circuit_breakers_triggered: string[];
+  debate_consensus: number | null;
+  red_team_robustness: number | null;
+  validation_valid: boolean | null;
+  fingerprint_hash: string | null;
+  historical_avg_score: number | null;
+  temporal_velocity: number | null;
+  temporal_direction: string | null;
 };
 
 export type ChatResponse = {

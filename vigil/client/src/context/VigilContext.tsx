@@ -2,10 +2,12 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type PropsWithChildren,
 } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { vigilApi } from '@/src/lib/api';
 import type {
@@ -13,6 +15,8 @@ import type {
   AnalysisResponse,
   ChatMessage,
 } from '@/src/types/vigil';
+
+const SESSION_KEY = 'vigil_session_id';
 
 type VigilContextValue = {
   apiBaseUrl: string;
@@ -66,6 +70,12 @@ export function VigilProvider({ children }: PropsWithChildren) {
   const [isSendingChat, setIsSendingChat] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
 
+  useEffect(() => {
+    AsyncStorage.getItem(SESSION_KEY).then((stored) => {
+      if (stored && !sessionId) setSessionId(stored);
+    });
+  }, []);
+
   const clearError = useCallback(() => {
     setLastError(null);
   }, []);
@@ -75,6 +85,7 @@ export function VigilProvider({ children }: PropsWithChildren) {
     setSessionId(null);
     setLastError(null);
     setChatMessages([getDefaultAssistantMessage()]);
+    AsyncStorage.removeItem(SESSION_KEY);
   }, []);
 
   const runAnalysis = useCallback(async (payload: AnalysisRequest) => {
@@ -85,6 +96,7 @@ export function VigilProvider({ children }: PropsWithChildren) {
       const result = await vigilApi.analyse(payload);
       setAnalysis(result);
       setSessionId(result.session_id);
+      AsyncStorage.setItem(SESSION_KEY, result.session_id);
       setChatMessages([
         getDefaultAssistantMessage(result.company),
         createMessage(

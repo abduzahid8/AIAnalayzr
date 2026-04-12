@@ -71,8 +71,8 @@ export const BENEFITS = [
   },
   {
     icon: 'bolt' as const,
-    title: '90-Second Intelligence',
-    desc: 'From raw data to executive strategy in under 2 minutes. No more waiting weeks for quarterly risk reports.',
+    title: 'Real-Time Intelligence',
+    desc: 'From raw data to executive strategy in under 90 seconds. No more waiting weeks for quarterly risk reports.',
   },
   {
     icon: 'comments' as const,

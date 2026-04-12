@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import {
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -42,37 +44,67 @@ export default function AdvisorScreen() {
   const showSuggestions = Boolean(sessionId && analysis && chatMessages.length < 4);
 
   return (
-    <View style={s.screen}>
+    <KeyboardAvoidingView
+      style={s.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
       <ScrollView ref={scrollRef} contentContainerStyle={s.content}>
         {/* ── Session Header ───────────────────────────────────────── */}
         {analysis ? (
-          <View style={s.sessionCard}>
-            <View style={s.sessionTop}>
-              <View style={s.sessionIconWrap}>
-                <FontAwesome name="comments-o" size={20} color={colors.accent} />
+          <>
+            <View style={s.sessionCard}>
+              <View style={s.sessionTop}>
+                <View style={s.sessionIconWrap}>
+                  <FontAwesome name="comments-o" size={20} color={colors.accent} />
+                </View>
+                <View style={s.sessionInfo}>
+                  <Text style={s.sessionEyebrow}>STRATEGIC ADVISOR</Text>
+                  <Text style={s.sessionCompany}>{analysis.company}</Text>
+                </View>
+                <View style={s.sessionTierBadge}>
+                  <Text style={[s.sessionTierText, { color: getTierColor(analysis.risk_tier) }]}>
+                    {Math.round(analysis.risk_score)} {analysis.risk_tier}
+                  </Text>
+                </View>
               </View>
-              <View style={s.sessionInfo}>
-                <Text style={s.sessionEyebrow}>STRATEGIC ADVISOR</Text>
-                <Text style={s.sessionCompany}>{analysis.company}</Text>
-              </View>
-              <View style={s.sessionTierBadge}>
-                <Text style={[s.sessionTierText, { color: getTierColor(analysis.risk_tier) }]}>
-                  {Math.round(analysis.risk_score)} {analysis.risk_tier}
-                </Text>
+              <Text style={s.sessionSummary}>{analysis.executive_summary}</Text>
+              <View style={s.sessionMeta}>
+                <View style={s.sessionPill}>
+                  <FontAwesome name="line-chart" size={10} color={colors.textMuted} />
+                  <Text style={s.sessionPillText}>{analysis.market_mode}</Text>
+                </View>
+                <View style={s.sessionPill}>
+                  <FontAwesome name="calendar" size={10} color={colors.textMuted} />
+                  <Text style={s.sessionPillText}>{analysis.planning_window || '~30 days'}</Text>
+                </View>
               </View>
             </View>
-            <Text style={s.sessionSummary}>{analysis.executive_summary}</Text>
-            <View style={s.sessionMeta}>
-              <View style={s.sessionPill}>
-                <FontAwesome name="line-chart" size={10} color={colors.textMuted} />
-                <Text style={s.sessionPillText}>{analysis.market_mode}</Text>
-              </View>
-              <View style={s.sessionPill}>
-                <FontAwesome name="calendar" size={10} color={colors.textMuted} />
-                <Text style={s.sessionPillText}>{analysis.planning_window || '~30 days'}</Text>
-              </View>
+            <View style={s.contextCard}>
+              <Text style={s.contextEyebrow}>SESSION SNAPSHOT</Text>
+              <Text style={s.contextTitle}>What the advisor is allowed to use</Text>
+              <Text style={s.contextBody}>
+                Answers are grounded in the same JSON payload you reviewed on Analyze: headline score
+                and tier, executive summary, risk themes, cascades, stress tests, and the latest signal
+                feed. It does not invent new market prices.
+              </Text>
+              <Text style={s.contextBullet}>
+                • Session id {analysis.session_id.slice(0, 8)}… ties this chat to that exact run.
+              </Text>
+              <Text style={s.contextBullet}>
+                • Confidence band{' '}
+                {(analysis.confidence_interval ?? [analysis.risk_score, analysis.risk_score])
+                  .map((n) => n.toFixed(1))
+                  .join(' – ')}{' '}
+                — ask the advisor how to tighten controls when the band is wide.
+              </Text>
+              <Text style={s.contextBullet}>
+                • Entropy {analysis.entropy_factor?.toFixed(3) ?? '—'} / divergence{' '}
+                {analysis.divergence_index?.toFixed(3) ?? '—'} — use these when you need a story
+                about conflicting data.
+              </Text>
             </View>
-          </View>
+          </>
         ) : (
           <View style={s.emptyCard}>
             <View style={s.emptyIconWrap}>
@@ -107,6 +139,8 @@ export default function AdvisorScreen() {
               {SUGGESTED_QUESTIONS.map((q) => (
                 <Pressable
                   key={q}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Ask: ${q}`}
                   style={({ pressed }) => [s.suggestionChip, pressed && s.suggestionChipPressed]}
                   onPress={() => handleSend(q)}
                   disabled={isSendingChat}
@@ -162,6 +196,7 @@ export default function AdvisorScreen() {
       {/* ── Composer ───────────────────────────────────────────────── */}
       <View style={s.composer}>
         <TextInput
+          accessibilityLabel="Type your question for the strategic advisor"
           placeholder={
             sessionId
               ? 'Ask about risks, strategy, timing, hiring, funding...'
@@ -177,6 +212,7 @@ export default function AdvisorScreen() {
         />
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel="Send message"
           disabled={chatDisabled}
           onPress={() => handleSend()}
           style={({ pressed }) => [
@@ -192,14 +228,14 @@ export default function AdvisorScreen() {
           />
         </Pressable>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
-function FeaturePill({ icon, text }: { icon: string; text: string }) {
+function FeaturePill({ icon, text }: { icon: React.ComponentProps<typeof FontAwesome>['name']; text: string }) {
   return (
     <View style={s.featurePill}>
-      <FontAwesome name={icon as any} size={12} color={colors.accent} />
+      <FontAwesome name={icon} size={12} color={colors.accent} />
       <Text style={s.featurePillText}>{text}</Text>
     </View>
   );
@@ -285,6 +321,36 @@ const s = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: '700',
+  },
+
+  contextCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 18,
+    gap: 8,
+  },
+  contextEyebrow: {
+    color: colors.accent,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 2,
+  },
+  contextTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  contextBody: {
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  contextBullet: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
   },
 
   // Empty State
