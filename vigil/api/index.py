@@ -2,21 +2,26 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
+import types
 from pathlib import Path
 
 
 CURRENT_FILE = Path(__file__).resolve()
 VIGIL_ROOT = CURRENT_FILE.parents[1]
-PROJECT_PARENT = VIGIL_ROOT.parent
 
 # Keep imports resilient for different deploy working directories.
 if str(VIGIL_ROOT) not in sys.path:
     sys.path.insert(0, str(VIGIL_ROOT))
-if str(PROJECT_PARENT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_PARENT))
 
-try:
-    from vigil.main import app
-except ModuleNotFoundError:
-    from main import app
+# When Vercel deploys with `vigil` as the project root, there is no parent
+# directory named `vigil` on sys.path. Create a lightweight package shim so
+# imports like `from vigil.core.config import settings` still resolve.
+package = sys.modules.get("vigil")
+if package is None:
+    package = types.ModuleType("vigil")
+    package.__path__ = [str(VIGIL_ROOT)]
+    sys.modules["vigil"] = package
+
+app = importlib.import_module("vigil.main").app

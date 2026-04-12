@@ -25,7 +25,7 @@ ZSCORE_THRESHOLD = 2.0
 
 
 async def _get_redis() -> aioredis.Redis:
-    return aioredis.from_url(settings.redis_url, decode_responses=True)
+    return aioredis.from_url(settings.get_redis_url(), decode_responses=True)
 
 
 async def detect_anomalies(

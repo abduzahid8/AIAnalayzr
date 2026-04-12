@@ -12,6 +12,7 @@ DEFAULT_CORS_ALLOWED_ORIGINS = (
     "http://127.0.0.1",
 )
 DEFAULT_CORS_ALLOW_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+DEFAULT_REDIS_URL = "redis://localhost:6379/0"
 
 
 class Settings(BaseSettings):
@@ -36,7 +37,8 @@ class Settings(BaseSettings):
     edgar_enabled: bool = True
 
     # ── Infrastructure ───────────────────────────────────────
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = DEFAULT_REDIS_URL
+    kv_url: str = ""
     public_api_base_url: str = ""
     cors_allowed_origins: str = ",".join(DEFAULT_CORS_ALLOWED_ORIGINS)
     cors_allow_origin_regex: str = DEFAULT_CORS_ALLOW_ORIGIN_REGEX
@@ -55,6 +57,14 @@ class Settings(BaseSettings):
 
     def get_public_api_base_url(self) -> str:
         return self.public_api_base_url.strip().rstrip("/")
+
+    def get_redis_url(self) -> str:
+        raw_value = self.redis_url.strip()
+        if self.kv_url.strip() and (not raw_value or raw_value == DEFAULT_REDIS_URL):
+            raw_value = self.kv_url.strip()
+        if raw_value and "://" not in raw_value:
+            raw_value = f"redis://{raw_value}"
+        return raw_value or DEFAULT_REDIS_URL
 
     def get_cors_allowed_origins(self) -> list[str]:
         raw_value = self.cors_allowed_origins.strip()

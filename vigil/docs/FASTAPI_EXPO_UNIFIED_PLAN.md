@@ -140,7 +140,7 @@ The App Store path should come from the Expo app, not the old wrapper scaffold.
 
 Before submission:
 
-- set a real iOS bundle identifier in `vigil/client/app.json`
+- set a real iOS bundle identifier in `vigil/client/.env` (`APPLE_BUNDLE_IDENTIFIER`)
 - replace placeholder app icons and splash assets
 - add at least one native-only value feature
 - test on a physical iPhone

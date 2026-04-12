@@ -8,7 +8,14 @@ Vigil has a long-running `/analyse` pipeline and Redis-backed state. It works be
 
 Vercel can still host it, but serverless timeouts can affect long analyses.
 
-## Vercel setup
+## Vercel setup (split projects)
+
+Use two separate Vercel projects from the same repository:
+
+- API project root: `vigil`
+- Web project root: `vigil/client`
+
+### API project (`vigil`)
 
 1. Import repository in Vercel.
 2. Set **Root Directory** to `vigil`.
@@ -19,6 +26,15 @@ Vercel can still host it, but serverless timeouts can affect long analyses.
 
 The app entrypoint is `vigil/api/index.py` and routes all requests to FastAPI.
 
+### Web project (`vigil/client`)
+
+1. Create a second Vercel project from the same repository.
+2. Set **Root Directory** to `vigil/client`.
+3. Add `EXPO_PUBLIC_API_BASE_URL` pointing to the API project URL.
+4. Deploy.
+
+`vigil/client/vercel.json` builds the Expo web bundle into `dist`.
+
 ## Required environment variables
 
 At minimum, configure:
@@ -27,6 +43,8 @@ At minimum, configure:
 - `REDIS_URL`
 - `PUBLIC_API_BASE_URL`
 - `CORS_ALLOWED_ORIGINS`
+
+If you use Vercel + Upstash integration, `KV_URL` is also supported automatically as a Redis connection fallback.
 
 Highly recommended:
 

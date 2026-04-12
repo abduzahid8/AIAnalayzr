@@ -184,18 +184,51 @@ def compute_entropy_factor(scores: list[float]) -> float:
     return round(min(base + entropy_bonus, 1.5), 4)
 
 
+MACRO_DIVERGENCE_THRESHOLD = 25.0
+
+
 def _compute_threshold_premium(
     raw_score: float,
     vix_level: float | None,
-) -> float:
-    """Apply non-linear circuit breaker premiums."""
-    premium = 0.0
+    *,
+    narrative_score: float = 50.0,
+    macro_score: float = 50.0,
+    market_score: float = 50.0,
+    yield_spread: float | None = None,
+    prev_narrative_score: float | None = None,
+) -> tuple[float, list[str]]:
+    """Apply non-linear circuit breaker premiums.
 
-    # VIX spike: automatic volatility premium
+    Returns (total_premium, list of triggered circuit breaker names).
+    """
+    premium = 0.0
+    triggered: list[str] = []
+
+    # CB1: VIX spike — automatic volatility premium
     if vix_level is not None and vix_level > VIX_SPIKE_THRESHOLD:
         premium += VIX_VOLATILITY_PREMIUM
+        triggered.append(f"vix_spike(VIX={vix_level:.1f})")
 
-    return premium
+    # CB2: Sentiment flip — narrative score moved >30 points from previous analysis
+    if prev_narrative_score is not None:
+        delta = abs(narrative_score - prev_narrative_score)
+        if delta > 30:
+            flip_premium = raw_score * (SENTIMENT_FLIP_MULTIPLIER - 1.0)
+            premium += flip_premium
+            triggered.append(f"sentiment_flip(delta={delta:.0f})")
+
+    # CB3: Yield curve inversion — 2y-10y spread is negative
+    if yield_spread is not None and yield_spread < 0:
+        premium += YIELD_INVERSION_PREMIUM
+        triggered.append(f"yield_inversion(spread={yield_spread:.2f})")
+
+    # CB4: Macro-market divergence — macro and market signals point opposite ways
+    if abs(macro_score - market_score) > MACRO_DIVERGENCE_THRESHOLD:
+        divergence_premium = abs(macro_score - market_score) * 0.15
+        premium += divergence_premium
+        triggered.append(f"macro_market_divergence(gap={abs(macro_score - market_score):.0f})")
+
+    return premium, triggered
 
 
 def adaptive_bayesian_score(
@@ -207,6 +240,8 @@ def adaptive_bayesian_score(
     sector: str | None = None,
     vix_level: float | None = None,
     confidences: dict[str, float] | None = None,
+    yield_spread: float | None = None,
+    prev_narrative_score: float | None = None,
 ) -> dict:
     """Compute the adaptive risk score.
 
@@ -234,16 +269,24 @@ def adaptive_bayesian_score(
     scores = [market, macro, narrative, competitive]
     entropy = compute_entropy_factor(scores)
 
-    # 6. Threshold premiums (circuit breakers)
-    premium = _compute_threshold_premium(raw, vix_level)
+    # 6. Threshold premiums (all circuit breakers active)
+    premium, circuit_breakers = _compute_threshold_premium(
+        raw, vix_level,
+        narrative_score=narrative,
+        macro_score=macro,
+        market_score=market,
+        yield_spread=yield_spread,
+        prev_narrative_score=prev_narrative_score,
+    )
 
     # 7. Final score
     final = round(max(0.0, min(100.0, raw * entropy + premium)), 2)
 
-    # 8. Confidence interval
+    # 8. Confidence interval — widen CI when circuit breakers fire
     std = float(pstdev(scores))
-    ci_low = round(max(0.0, final - 1.96 * std), 2)
-    ci_high = round(min(100.0, final + 1.96 * std), 2)
+    cb_uncertainty = 1.0 + 0.15 * len(circuit_breakers)
+    ci_low = round(max(0.0, final - 1.96 * std * cb_uncertainty), 2)
+    ci_high = round(min(100.0, final + 1.96 * std * cb_uncertainty), 2)
 
     # 9. Tier assignment
     tier = score_to_tier(final)
@@ -261,6 +304,7 @@ def adaptive_bayesian_score(
             "competitive_weighted": round(competitive * weights["competitive"], 2),
             "threshold_premium": round(premium, 2),
         },
+        "circuit_breakers_triggered": circuit_breakers,
         "weights_used": weights,
         "weight_profile_used": profile_name,
         "vix_regime_active": vix_level is not None and vix_level >= VIX_ELEVATED_THRESHOLD,

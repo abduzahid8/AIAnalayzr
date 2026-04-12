@@ -1,7 +1,8 @@
-"""Agent 5 – MarketOracle (Tier 2 – Multi-Step)
+"""Agent 5 – MarketOracle (Tier 2 – Multi-Step with Self-Correction)
 
-Synthesises Tier-1 outputs + debate results into a unified market regime
-assessment.  Runs AFTER debate protocol, consuming cross-validated signals.
+Synthesises Tier-1 outputs + debate results + red team findings into
+a unified market regime assessment.  Runs AFTER debate and red team,
+consuming cross-validated and adversarially-tested signals.
 """
 
 from __future__ import annotations
@@ -10,7 +11,14 @@ import json
 import logging
 from typing import Any
 
-from vigil.agents.base import verify_agent_output, build_confidence, format_data_context
+from vigil.agents.base import (
+    SELF_CORRECTION_THRESHOLD,
+    build_confidence,
+    build_reasoning_trace,
+    format_data_context,
+    self_correct,
+    verify_agent_output,
+)
 from vigil.core.state import AgentConfidence, MarketOracleOutput, VigilState
 from vigil.services.llm import llm_json
 
@@ -21,13 +29,16 @@ SYSTEM_PROMPT = """\
 <mission>
 You receive outputs from four upstream agents (SignalHarvester, NarrativeIntel,
 MacroWatchdog, CompetitiveIntel) PLUS the results of an inter-agent debate
-that identified contradictions and resolved signal hierarchy.
+that identified contradictions, a red team adversarial challenge, and
+resolved signal hierarchy.
 
 Your job is to synthesise everything into a holistic market regime assessment.
-Pay special attention to the debate results — they tell you which signals
-are most trustworthy and where agents disagreed.
+Pay special attention to:
+  - Debate results: which signals are most trustworthy, where agents disagreed
+  - Red team findings: known vulnerabilities and the counter-narrative
+  - Confidence levels: weight higher-confidence agents more heavily
 
-Also consider the company's specific risk exposures, active regulations, and
+Consider the company's specific risk exposures, active regulations, and
 financial position when determining regime impact.
 </mission>
 <output_format>
@@ -49,7 +60,7 @@ Return ONLY valid JSON matching this schema:
 <constraints>
 - Your composite_market_score should reflect the SYNTHESIS, not just the average.
 - Weight agents by their CONFIDENCE scores — low-confidence agents get less influence.
-- Highlight any contradictions between agents and explain resolution.
+- If the red team found critical vulnerabilities, address them in your outlook.
 - composite_market_score MUST be a number between 0 and 100.
 </constraints>
 """
@@ -84,6 +95,17 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
             f"Contradictions Resolved: {json.dumps(state.debate_result.resolved_contradictions, default=str)}\n"
         )
 
+    red_team_context = ""
+    if state.red_team_result:
+        rt = state.red_team_result
+        red_team_context = (
+            f"\n=== Red Team Challenge Results ===\n"
+            f"Robustness: {rt.get('robustness_score', 'N/A')}\n"
+            f"Counter-Narrative: {rt.get('counter_narrative', 'N/A')}\n"
+            f"Weakest Agent: {rt.get('weakest_agent', 'N/A')}\n"
+            f"Critical Vulnerabilities: {sum(1 for v in rt.get('vulnerabilities', []) if v.get('severity') == 'critical')}\n"
+        )
+
     data_summary_str = ""
     if data_bundle is not None:
         data_summary_str = (
@@ -101,13 +123,13 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
         f"=== Tier-1 Agent Outputs (with confidence scores) ===\n"
         f"{json.dumps(tier1_context, indent=2, default=str)}\n"
         f"{debate_context}"
+        f"{red_team_context}"
         f"{data_summary_str}\n"
         "Synthesise these signals into your market regime assessment."
     )
 
     analysis = await llm_json(SYSTEM_PROMPT, user_msg)
 
-    # Verification for Tier-2 agent
     data_quality = data_bundle.data_quality if data_bundle else "sparse"
     verification = await verify_agent_output(
         agent_name="MarketOracle",
@@ -116,13 +138,27 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
         data_quality=data_quality,
     )
 
+    was_corrected = False
+    conf_score = float(verification.get("confidence_score", 0.7))
+    if conf_score < SELF_CORRECTION_THRESHOLD or verification.get("requires_reanalysis"):
+        logger.info("MarketOracle triggered self-correction (conf=%.2f)", conf_score)
+        analysis = await self_correct(
+            "MarketOracle", SYSTEM_PROMPT, analysis,
+            verification, json.dumps(tier1_context, indent=2, default=str),
+        )
+        was_corrected = True
+
     confidence = build_confidence(verification, data_quality)
     output = MarketOracleOutput.model_validate(analysis)
     output.confidence = confidence
 
     state.market_oracle = output
+    state.reasoning_traces.append(
+        build_reasoning_trace("MarketOracle", data_quality, analysis, verification, was_corrected)
+    )
+
     logger.info(
-        "MarketOracle complete – regime=%s, composite=%.1f, confidence=%.2f",
-        output.market_regime, output.composite_market_score, confidence.score,
+        "MarketOracle complete – regime=%s, composite=%.1f, corrected=%s",
+        output.market_regime, output.composite_market_score, was_corrected,
     )
     return state

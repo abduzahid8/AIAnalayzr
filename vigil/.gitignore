@@ -10,3 +10,4 @@ mobile/node_modules/
 # Proprietary prompts – keep private in production deployments
 # Uncomment the line below to prevent prompts from being committed:
 # prompts/*.txt
+.vercel

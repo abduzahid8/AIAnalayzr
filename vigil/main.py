@@ -2,14 +2,18 @@
 
 FastAPI entry point and DAG Orchestrator.
 
-Enhanced pipeline topology:
+Enhanced pipeline topology (v4.0):
     Pre-flight            : DataAggregator (parallel fetch of all external sources)
+    Fingerprint           : Historical cohort lookup
     Tier 1  (parallel)    : SignalHarvester, NarrativeIntel, MacroWatchdog, CompetitiveIntel
+                            (each with self-correction loop + reasoning trace)
     Debate                : Inter-Agent Debate Protocol
-    Tier 2  (sequential)  : MarketOracle -> RiskSynthesizer
+    Red Team              : Adversarial Challenge Protocol
+    Tier 2  (sequential)  : MarketOracle -> RiskSynthesizer (with cascades + stress tests)
+    Anomaly Detection     : Statistical outlier flagging
     Validation            : Output Validator
-    Tier 3  (executive)   : StrategyCommander
-    Post-run              : CorrelationEngine, Fingerprint, History, Anomaly Detection
+    Tier 3  (executive)   : StrategyCommander (with 3-scenario model)
+    Post-run              : Advanced Correlations, Temporal Delta, Fingerprint, History
 """
 
 from __future__ import annotations
@@ -41,11 +45,13 @@ from vigil.agents import (
     strategy_commander,
 )
 from vigil.agents.debate import run_debate
+from vigil.agents.red_team import run_red_team
 from vigil.agents.validator import run_validation
 from vigil.core.anomaly import detect_anomalies
 from vigil.core.config import settings
 from vigil.core.fingerprint import lookup_fingerprint, store_analysis_fingerprint
 from vigil.core.history import store_analysis
+from vigil.core.temporal import compute_temporal_delta, format_temporal_context
 from vigil.core.state import (
     ChatMessage,
     CompanyProfile,
@@ -70,15 +76,19 @@ logger = logging.getLogger("vigil.orchestrator")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Vigil platform starting – DAG Orchestrator online (v3.0)")
+    logger.info("Vigil platform starting – DAG Orchestrator online (v4.0)")
     yield
     logger.info("Vigil platform shutting down")
 
 
 app = FastAPI(
     title="Vigil – Risk Intelligence Platform",
-    version="3.0.0",
-    description="Multi-step agent pipeline with real data feeds, inter-agent debate, validation layer, and adaptive scoring.",
+    version="4.0.0",
+    description=(
+        "Multi-step agent pipeline with self-correction, red team adversarial challenge, "
+        "risk cascade mapping, stress testing, 3-scenario modeling, temporal delta analysis, "
+        "and advanced correlation engine."
+    ),
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -124,6 +134,37 @@ class RiskThemeResponse(BaseModel):
     source_agents: list[str]
 
 
+class RiskCascadeResponse(BaseModel):
+    trigger_theme: str
+    affected_theme: str
+    cascade_probability: float
+    mechanism: str
+    time_horizon: str
+
+
+class StressScenarioResponse(BaseModel):
+    scenario_id: str
+    name: str
+    trigger: str
+    score_impact: float
+    resulting_tier: str
+    description: str
+    probability: float
+
+
+class ScenarioModelResponse(BaseModel):
+    best_case: str
+    best_case_score: float
+    best_case_probability: float
+    base_case: str
+    base_case_score: float
+    base_case_probability: float
+    worst_case: str
+    worst_case_score: float
+    worst_case_probability: float
+    expected_value_score: float
+
+
 class AnomalyFlagResponse(BaseModel):
     flag_id: str
     description: str
@@ -134,6 +175,14 @@ class SignalFeedItemResponse(BaseModel):
     label: str
     delta: str
     sentiment: str
+
+
+class ReasoningTraceResponse(BaseModel):
+    agent_name: str
+    steps: list[str]
+    was_self_corrected: bool
+    verification_issues_count: int
+    missed_signals: list[str]
 
 
 class AnalysisResponse(BaseModel):
@@ -150,18 +199,27 @@ class AnalysisResponse(BaseModel):
     planning_window: str
     market_mode: str
     risk_themes: list[RiskThemeResponse]
+    risk_cascades: list[RiskCascadeResponse]
+    stress_scenarios: list[StressScenarioResponse]
+    scenario_model: ScenarioModelResponse | None = None
     anomaly_flags: list[AnomalyFlagResponse]
     strategic_actions: list[dict[str, Any]]
     signal_feed: list[SignalFeedItemResponse]
     agent_correlations: dict[str, float]
+    advanced_correlations: dict[str, Any]
     divergence_index: float
+    reasoning_traces: list[ReasoningTraceResponse]
     pipeline_duration_seconds: float
     data_quality: str
     data_sources: list[str]
+    circuit_breakers_triggered: list[str]
     debate_consensus: float | None = None
+    red_team_robustness: float | None = None
     validation_valid: bool | None = None
     fingerprint_hash: str | None = None
     historical_avg_score: float | None = None
+    temporal_velocity: float | None = None
+    temporal_direction: str | None = None
 
 
 class SessionStatusResponse(BaseModel):
@@ -202,7 +260,7 @@ async def _run_agent_safe(
 
 
 async def run_pipeline(state: VigilState) -> VigilState:
-    """Execute the full enhanced DAG pipeline."""
+    """Execute the full enhanced DAG pipeline (v4.0)."""
     t0 = time.monotonic()
 
     # ── Pre-flight: Fetch all external data in parallel ──────
@@ -221,10 +279,10 @@ async def run_pipeline(state: VigilState) -> VigilState:
     # ── Fingerprint lookup ───────────────────────────────────
     state.fingerprint = await lookup_fingerprint(state.company)
 
-    # ── Tier 1: Parallel multi-step agents ───────────────────
+    # ── Tier 1: Parallel multi-step agents with self-correction ──
     state.stage = PipelineStage.TIER1_RUNNING
     await save_state(state)
-    logger.info(">> Tier 1 – launching 4 multi-step agents in parallel")
+    logger.info(">> Tier 1 – launching 4 multi-step agents (with self-correction)")
 
     s1, s2, s3, s4 = await asyncio.gather(
         _run_agent_safe(signal_harvester.run, copy.deepcopy(state), "SignalHarvester", bundle),
@@ -237,7 +295,9 @@ async def run_pipeline(state: VigilState) -> VigilState:
     state.narrative_intel = s2.narrative_intel
     state.macro_watchdog = s3.macro_watchdog
     state.competitive_intel = s4.competitive_intel
-    state.errors.extend(s1.errors + s2.errors + s3.errors + s4.errors)
+    for s in (s1, s2, s3, s4):
+        state.errors.extend(s.errors)
+        state.reasoning_traces.extend(s.reasoning_traces)
 
     state.stage = PipelineStage.TIER1_DONE
     await save_state(state)
@@ -247,21 +307,26 @@ async def run_pipeline(state: VigilState) -> VigilState:
     state.stage = PipelineStage.DEBATE_RUNNING
     await save_state(state)
     logger.info(">> Debate – cross-validating Tier-1 outputs")
-
     state = await run_debate(state)
-
     state.stage = PipelineStage.DEBATE_DONE
     await save_state(state)
     logger.info(">> Debate complete (%.1fs)", time.monotonic() - t0)
 
+    # ── Red Team: Adversarial challenge ──────────────────────
+    state.stage = PipelineStage.RED_TEAM_RUNNING
+    await save_state(state)
+    logger.info(">> Red Team – adversarial challenge")
+    state = await run_red_team(state, bundle)
+    state.stage = PipelineStage.RED_TEAM_DONE
+    await save_state(state)
+    logger.info(">> Red Team complete (%.1fs)", time.monotonic() - t0)
+
     # ── Tier 2: Sequential synthesis → scoring ───────────────
     state.stage = PipelineStage.TIER2_RUNNING
     await save_state(state)
-    logger.info(">> Tier 2 – MarketOracle -> RiskSynthesizer")
-
+    logger.info(">> Tier 2 – MarketOracle -> RiskSynthesizer (with cascades + stress)")
     state = await _run_agent_safe(market_oracle.run, state, "MarketOracle", bundle)
     state = await _run_agent_safe(risk_synthesizer.run, state, "RiskSynthesizer", bundle)
-
     state.stage = PipelineStage.TIER2_DONE
     await save_state(state)
     logger.info(">> Tier 2 complete (%.1fs)", time.monotonic() - t0)
@@ -282,20 +347,16 @@ async def run_pipeline(state: VigilState) -> VigilState:
     state.stage = PipelineStage.VALIDATION_RUNNING
     await save_state(state)
     logger.info(">> Validation – checking output quality")
-
     state = await run_validation(state, bundle)
-
     state.stage = PipelineStage.VALIDATION_DONE
     await save_state(state)
     logger.info(">> Validation complete (%.1fs)", time.monotonic() - t0)
 
-    # ── Tier 3: Executive output ─────────────────────────────
+    # ── Tier 3: Executive output with scenario model ─────────
     state.stage = PipelineStage.TIER3_RUNNING
     await save_state(state)
-    logger.info(">> Tier 3 – StrategyCommander")
-
+    logger.info(">> Tier 3 – StrategyCommander (with 3-scenario model)")
     state = await _run_agent_safe(strategy_commander.run, state, "StrategyCommander", bundle)
-
     state.stage = PipelineStage.COMPLETE
     await save_state(state)
     elapsed = time.monotonic() - t0
@@ -319,13 +380,15 @@ CHAT_SYSTEM_PROMPT = """\
 <role>Vigil Strategic Advisor</role>
 <mission>
 You are an AI strategic advisor embedded in the Vigil risk intelligence platform.
-You have access to a full risk analysis for the company described below.
+You have access to a full risk analysis for the company described below,
+including scenario models, risk cascades, stress tests, and red team findings.
 Answer the user's question with specific, actionable business advice.
 Always tie your answer back to the risk data when relevant.
 If the question involves a decision (launch, invest, hire, etc.), provide:
 1. Your recommendation
 2. The key risk factors affecting it
-3. A risk-adjusted action plan
+3. The scenario model implications (best/base/worst case)
+4. A risk-adjusted action plan
 Be concise but thorough. Use the company's actual data, not generic advice.
 </mission>
 <company_context>
@@ -364,6 +427,19 @@ def _build_chat_context(state: VigilState) -> str:
         for t in risk.risk_themes[:5]:
             sections.append(f"  - {t.name}: {t.severity:.0f}% -- {t.description}")
 
+    if risk and risk.risk_cascades:
+        sections.append("\nRisk Cascades:")
+        for c in risk.risk_cascades[:3]:
+            sections.append(f"  - {c.trigger_theme} -> {c.affected_theme}: {c.mechanism}")
+
+    if strat and strat.scenario_model:
+        sm = strat.scenario_model
+        sections.append("\nScenario Model:")
+        sections.append(f"  Best case ({sm.best_case_probability:.0%}): score={sm.best_case_score:.0f} — {sm.best_case}")
+        sections.append(f"  Base case ({sm.base_case_probability:.0%}): score={sm.base_case_score:.0f} — {sm.base_case}")
+        sections.append(f"  Worst case ({sm.worst_case_probability:.0%}): score={sm.worst_case_score:.0f} — {sm.worst_case}")
+        sections.append(f"  Expected value: {sm.expected_value_score:.1f}")
+
     if risk and risk.anomaly_flags:
         sections.append("\nAnomaly Flags:")
         for a in risk.anomaly_flags[:3]:
@@ -376,6 +452,10 @@ def _build_chat_context(state: VigilState) -> str:
 
     if state.fingerprint and state.fingerprint.historical_avg_score is not None:
         sections.append(f"\nHistorical Context: Similar companies avg score: {state.fingerprint.historical_avg_score:.1f}")
+
+    if state.red_team_result:
+        sections.append(f"\nRed Team Robustness: {state.red_team_result.get('robustness_score', 'N/A')}")
+        sections.append(f"Counter-Narrative: {state.red_team_result.get('counter_narrative', 'N/A')}")
 
     return "\n".join(sections)
 
@@ -427,30 +507,74 @@ async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
     strat = state.strategy_commander
     oracle = state.market_oracle
 
-    correlations = correlation_engine.compute_correlations(state)
+    basic_correlations = correlation_engine.compute_correlations(state)
     divergence = correlation_engine.compute_divergence_index(state)
+    advanced_corr = correlation_engine.compute_advanced_correlations(state)
+
+    # Temporal delta analysis
+    temporal = None
+    temporal_velocity = None
+    temporal_direction = None
+    if risk:
+        temporal = await compute_temporal_delta(
+            state.company.sector,
+            risk.final_score,
+            state.company.geography,
+        )
+        temporal_velocity = temporal.sector_velocity
+        temporal_direction = temporal.sector_direction
 
     risk_themes_resp = []
     if risk and risk.risk_themes:
         risk_themes_resp = [
             RiskThemeResponse(
-                theme_id=t.theme_id,
-                name=t.name,
-                severity=t.severity,
-                category=t.category,
-                description=t.description,
+                theme_id=t.theme_id, name=t.name, severity=t.severity,
+                category=t.category, description=t.description,
                 source_agents=t.source_agents,
             )
             for t in risk.risk_themes
         ]
 
+    cascades_resp = []
+    if risk and risk.risk_cascades:
+        cascades_resp = [
+            RiskCascadeResponse(
+                trigger_theme=c.trigger_theme, affected_theme=c.affected_theme,
+                cascade_probability=c.cascade_probability, mechanism=c.mechanism,
+                time_horizon=c.time_horizon,
+            )
+            for c in risk.risk_cascades
+        ]
+
+    stress_resp = []
+    if risk and risk.stress_scenarios:
+        stress_resp = [
+            StressScenarioResponse(
+                scenario_id=s.scenario_id, name=s.name, trigger=s.trigger,
+                score_impact=s.score_impact, resulting_tier=s.resulting_tier,
+                description=s.description, probability=s.probability,
+            )
+            for s in risk.stress_scenarios
+        ]
+
+    scenario_resp = None
+    if strat and strat.scenario_model:
+        sm = strat.scenario_model
+        scenario_resp = ScenarioModelResponse(
+            best_case=sm.best_case, best_case_score=sm.best_case_score,
+            best_case_probability=sm.best_case_probability,
+            base_case=sm.base_case, base_case_score=sm.base_case_score,
+            base_case_probability=sm.base_case_probability,
+            worst_case=sm.worst_case, worst_case_score=sm.worst_case_score,
+            worst_case_probability=sm.worst_case_probability,
+            expected_value_score=sm.expected_value_score,
+        )
+
     anomaly_flags_resp = []
     if risk and risk.anomaly_flags:
         anomaly_flags_resp = [
             AnomalyFlagResponse(
-                flag_id=a.flag_id,
-                description=a.description,
-                severity=a.severity,
+                flag_id=a.flag_id, description=a.description, severity=a.severity,
             )
             for a in risk.anomaly_flags
         ]
@@ -463,6 +587,22 @@ async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
             )
             for s in strat.signal_feed
         ]
+
+    traces_resp = [
+        ReasoningTraceResponse(
+            agent_name=t.agent_name, steps=t.steps,
+            was_self_corrected=t.was_self_corrected,
+            verification_issues_count=t.verification_issues_count,
+            missed_signals=t.missed_signals,
+        )
+        for t in state.reasoning_traces
+    ]
+
+    circuit_breakers: list[str] = []
+    if risk and risk.scoring_breakdown:
+        cb_premium = risk.scoring_breakdown.get("threshold_premium", 0)
+        if cb_premium > 0:
+            circuit_breakers.append(f"threshold_premium={cb_premium:.1f}")
 
     return AnalysisResponse(
         session_id=state.session_id,
@@ -478,19 +618,29 @@ async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
         planning_window=strat.planning_window if strat else "",
         market_mode=strat.market_mode if strat else "",
         risk_themes=risk_themes_resp,
+        risk_cascades=cascades_resp,
+        stress_scenarios=stress_resp,
+        scenario_model=scenario_resp,
         anomaly_flags=anomaly_flags_resp,
         strategic_actions=[
             a.model_dump() for a in (strat.actions if strat else [])
         ],
         signal_feed=signal_feed_resp,
-        agent_correlations=correlations,
+        agent_correlations=basic_correlations,
+        advanced_correlations=advanced_corr,
         divergence_index=divergence,
+        reasoning_traces=traces_resp,
         pipeline_duration_seconds=round(elapsed, 2),
         data_quality=state.data_quality,
         data_sources=state.data_sources,
+        circuit_breakers_triggered=circuit_breakers,
         debate_consensus=(
             state.debate_result.consensus_score
             if state.debate_result else None
+        ),
+        red_team_robustness=(
+            state.red_team_result.get("robustness_score")
+            if state.red_team_result else None
         ),
         validation_valid=(
             state.validation_result.is_valid
@@ -504,6 +654,8 @@ async def analyse_company(req: AnalysisRequest) -> AnalysisResponse:
             state.fingerprint.historical_avg_score
             if state.fingerprint else None
         ),
+        temporal_velocity=temporal_velocity,
+        temporal_direction=temporal_direction,
     )
 
 
@@ -578,7 +730,7 @@ async def health_check() -> dict:
     return {
         "status": overall_status,
         "service": "vigil",
-        "version": "3.0.0",
+        "version": "4.0.0",
         "checks": {
             "redis": "ok" if redis_ok else "down",
             "llm_key_present": bool(settings.aiml_api_key),
@@ -587,6 +739,11 @@ async def health_check() -> dict:
         "features": {
             "debate_layer": settings.debate_layer,
             "agent_verification": settings.agent_verification,
+            "self_correction": settings.agent_verification,
+            "red_team": settings.vigil_tier == "pro",
+            "stress_testing": True,
+            "scenario_modeling": True,
+            "temporal_analysis": True,
             "tier": settings.vigil_tier,
         },
     }

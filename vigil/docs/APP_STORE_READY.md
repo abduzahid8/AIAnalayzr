@@ -1,71 +1,102 @@
-# Vigil App Store Prep
+# Vigil App Store Connect + Upload
 
-Vigil should now use the Expo app in `vigil/client` as the main iOS path.
+This project is now prepared to ship from the Expo app in `vigil/client`.
 
-Do not treat the older `vigil/mobile` wrapper as the primary App Store solution.
+## 1) Fill Client Environment
 
-## Main App Path
+Create `vigil/client/.env` from `vigil/client/.env.example` and set:
 
-Use the Expo app for both:
+```text
+EXPO_PUBLIC_API_BASE_URL=https://api.yourdomain.com
+EXPO_PUBLIC_APP_NAME=Vigil
+EXPO_PUBLIC_APP_SLUG=vigil
+EXPO_PUBLIC_APP_SCHEME=vigil
+APPLE_BUNDLE_IDENTIFIER=com.yourcompany.vigil
+ANDROID_PACKAGE=com.yourcompany.vigil
+EAS_PROJECT_ID=
+```
 
-- web
-- iPhone
+`EAS_PROJECT_ID` is filled automatically after `eas init`.
+This project is already linked to EAS project id `bbda81dd-13fc-47ee-a82a-29dfcd1936b7`.
 
-That gives you one React Native codebase instead of a thin website wrapper.
+## 2) Backend CORS/API Setup
 
-## Client Setup
+In backend `.env`:
+
+```text
+PUBLIC_API_BASE_URL=https://api.yourdomain.com
+CORS_ALLOWED_ORIGINS=https://your-production-web-domain.com
+CORS_ALLOW_ORIGIN_REGEX=https?://(localhost|127\.0\.0\.1)(:\d+)?$
+```
+
+## 3) Create App in App Store Connect
+
+In App Store Connect:
+
+- create a new iOS app
+- set bundle identifier exactly equal to `APPLE_BUNDLE_IDENTIFIER`
+- keep app status ready for upload
+- copy the Apple app ID (`ascAppId`)
+
+## 4) Configure EAS Submission
+
+Edit `vigil/client/eas.json`:
+
+- replace `YOUR_ASC_APP_ID`
+- replace `YOUR_APPLE_TEAM_ID`
+
+## 5) Initialize EAS Project
 
 From `vigil/client`:
 
 ```bash
 npm install
-npm run start
-npm run web
-npm run ios
+npm run eas:init
 ```
 
-Create `vigil/client/.env` from `vigil/client/.env.example` and set:
+Then copy the generated EAS project id into `EAS_PROJECT_ID` in `.env`.
 
-```text
-EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+## 6) Build iOS Binary
+
+```bash
+npm run eas:build:ios
 ```
 
-For a physical iPhone or production build, use your LAN URL or deployed HTTPS API URL instead of localhost.
+This creates the signed `.ipa` in EAS cloud build.
+If this is your first build on this machine/account, run once in interactive mode to set up Apple credentials:
 
-## Backend Setup
-
-In the FastAPI backend, make sure these values are set:
-
-```text
-PUBLIC_API_BASE_URL=http://127.0.0.1:8000
-CORS_ALLOWED_ORIGINS=https://your-production-web-domain.com
-CORS_ALLOW_ORIGIN_REGEX=https?://(localhost|127\.0\.0\.1)(:\d+)?$
+```bash
+npx eas build --platform ios --profile production
 ```
 
-Notes:
+## 7) Upload to App Store Connect
 
-- Expo Web needs localhost CORS with ports.
-- Native iOS requests are less sensitive to browser CORS, but your web build still needs it.
+```bash
+npm run eas:submit:ios
+```
 
-## App Store Checklist
+One-command build + upload:
 
-- replace the placeholder bundle identifier in `vigil/client/app.json`
-- replace placeholder icon and splash assets
-- test the app on a physical iPhone
-- make sure the backend is reachable over HTTPS for production
-- add privacy policy and support URLs in App Store Connect
-- complete the App Privacy questionnaire
+```bash
+npm run release:ios
+```
 
-## Native Value Requirement
+## 8) Final App Store Checklist
 
-To improve App Review odds, add at least one clearly native feature before submission:
+- replace placeholder icons/splash in `vigil/client/assets/images`
+- verify app name, subtitle, keywords, description in App Store Connect
+- add privacy policy URL and support URL
+- complete App Privacy answers
+- test on a physical iPhone with production API
 
-- biometric unlock
-- secure session storage
-- native share/export of reports
-- push alerts for high-risk changes
-- offline cache for the latest completed report
+## Required Credentials
 
-## Long-Term Plan
+You need:
 
-For the unified frontend architecture, follow `vigil/docs/FASTAPI_EXPO_UNIFIED_PLAN.md`.
+- Expo account access
+- Apple Developer account access
+- App Store Connect access
+- Apple Team ID
+- App Store Connect app ID (`ascAppId`)
+
+For non-interactive CI submission, use an App Store Connect API key (`.p8`) with EAS submit.

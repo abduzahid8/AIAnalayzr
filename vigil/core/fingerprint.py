@@ -25,7 +25,7 @@ FINGERPRINT_TTL = 86400 * 90  # 90 days
 
 
 async def _get_redis() -> aioredis.Redis:
-    return aioredis.from_url(settings.redis_url, decode_responses=True)
+    return aioredis.from_url(settings.get_redis_url(), decode_responses=True)
 
 
 def compute_fingerprint_hash(profile: CompanyProfile) -> str:

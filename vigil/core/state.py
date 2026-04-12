@@ -8,6 +8,7 @@ agent can corrupt the shared context with unexpected types.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
@@ -17,6 +18,8 @@ import redis.asyncio as aioredis
 from pydantic import BaseModel, Field
 
 from vigil.core.config import settings
+
+logger = logging.getLogger("vigil.core.state")
 
 # ── Enums ────────────────────────────────────────────────────────────
 
@@ -35,8 +38,12 @@ class PipelineStage(str, Enum):
     TIER1_DONE = "TIER1_DONE"
     DEBATE_RUNNING = "DEBATE_RUNNING"
     DEBATE_DONE = "DEBATE_DONE"
+    RED_TEAM_RUNNING = "RED_TEAM_RUNNING"
+    RED_TEAM_DONE = "RED_TEAM_DONE"
     TIER2_RUNNING = "TIER2_RUNNING"
     TIER2_DONE = "TIER2_DONE"
+    STRESS_TEST_RUNNING = "STRESS_TEST_RUNNING"
+    STRESS_TEST_DONE = "STRESS_TEST_DONE"
     VALIDATION_RUNNING = "VALIDATION_RUNNING"
     VALIDATION_DONE = "VALIDATION_DONE"
     TIER3_RUNNING = "TIER3_RUNNING"
@@ -135,6 +142,49 @@ class AnomalyFlag(BaseModel):
     source: str = ""
 
 
+class ReasoningTrace(BaseModel):
+    """Auditable step-by-step reasoning chain for an agent."""
+    agent_name: str = ""
+    steps: list[str] = Field(default_factory=list)
+    was_self_corrected: bool = False
+    verification_issues_count: int = 0
+    missed_signals: list[str] = Field(default_factory=list)
+
+
+class RiskCascade(BaseModel):
+    """Models how one risk theme triggers another in a causal chain."""
+    trigger_theme: str
+    affected_theme: str
+    cascade_probability: float = Field(default=0.5, ge=0.0, le=1.0)
+    mechanism: str = ""
+    time_horizon: str = ""
+
+
+class StressScenario(BaseModel):
+    """A single what-if stress test scenario."""
+    scenario_id: str
+    name: str
+    trigger: str
+    score_impact: float = 0.0
+    resulting_tier: str = ""
+    description: str = ""
+    probability: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class ScenarioModel(BaseModel):
+    """Three-scenario outcome model (best/base/worst)."""
+    best_case: str = ""
+    best_case_score: float = 0.0
+    best_case_probability: float = 0.25
+    base_case: str = ""
+    base_case_score: float = 50.0
+    base_case_probability: float = 0.50
+    worst_case: str = ""
+    worst_case_score: float = 100.0
+    worst_case_probability: float = 0.25
+    expected_value_score: float = 50.0
+
+
 class RiskSynthesizerOutput(BaseModel):
     raw_score: float = Field(default=50.0, ge=0, le=100)
     final_score: float = Field(default=50.0, ge=0, le=100)
@@ -144,6 +194,8 @@ class RiskSynthesizerOutput(BaseModel):
     scoring_breakdown: dict[str, float] = Field(default_factory=dict)
     risk_themes: list[RiskTheme] = Field(default_factory=list)
     anomaly_flags: list[AnomalyFlag] = Field(default_factory=list)
+    risk_cascades: list[RiskCascade] = Field(default_factory=list)
+    stress_scenarios: list[StressScenario] = Field(default_factory=list)
     sector_weight_profile: str = ""
     confidence: AgentConfidence = Field(default_factory=AgentConfidence)
 
@@ -171,6 +223,7 @@ class StrategyCommanderOutput(BaseModel):
     playbook_horizon_days: int = 30
     signal_feed: list[SignalFeedItem] = Field(default_factory=list)
     market_mode: str = ""
+    scenario_model: ScenarioModel | None = None
     confidence: AgentConfidence = Field(default_factory=AgentConfidence)
 
 
@@ -241,6 +294,10 @@ class VigilState(BaseModel):
     # Cross-session intelligence
     fingerprint: RiskFingerprint | None = None
 
+    # Reasoning audit trail
+    reasoning_traces: list[ReasoningTrace] = Field(default_factory=list)
+    red_team_result: dict[str, Any] | None = None
+
     # Metadata
     data_quality: str = "sparse"
     data_sources: list[str] = Field(default_factory=list)
@@ -252,20 +309,21 @@ class VigilState(BaseModel):
 # ── Redis-backed persistence ─────────────────────────────────────────
 
 _pool: aioredis.Redis | None = None
+_memory_store: dict[str, str] = {}
 
 
 async def _get_redis() -> aioredis.Redis:
     global _pool
     if _pool is None:
         _pool = aioredis.from_url(
-            settings.redis_url, decode_responses=True
+            settings.get_redis_url(), decode_responses=True
         )
     return _pool
 
 
 async def ping_redis() -> bool:
-    r = await _get_redis()
     try:
+        r = await _get_redis()
         pong = await r.ping()
     except Exception:
         return False
@@ -277,18 +335,32 @@ def _key(session_id: str) -> str:
 
 
 async def save_state(state: VigilState, ttl: int = 3600) -> None:
-    r = await _get_redis()
-    await r.set(_key(state.session_id), state.model_dump_json(), ex=ttl)
+    payload = state.model_dump_json()
+    try:
+        r = await _get_redis()
+        await r.set(_key(state.session_id), payload, ex=ttl)
+    except Exception as exc:
+        logger.warning("Redis save failed, using in-memory state store: %s", exc)
+        _memory_store[state.session_id] = payload
 
 
 async def load_state(session_id: str) -> VigilState | None:
-    r = await _get_redis()
-    raw = await r.get(_key(session_id))
+    raw: str | None = None
+    try:
+        r = await _get_redis()
+        raw = await r.get(_key(session_id))
+    except Exception as exc:
+        logger.warning("Redis load failed, using in-memory state store: %s", exc)
+        raw = _memory_store.get(session_id)
     if raw is None:
         return None
     return VigilState.model_validate_json(raw)
 
 
 async def delete_state(session_id: str) -> None:
-    r = await _get_redis()
-    await r.delete(_key(session_id))
+    _memory_store.pop(session_id, None)
+    try:
+        r = await _get_redis()
+        await r.delete(_key(session_id))
+    except Exception as exc:
+        logger.warning("Redis delete failed, removed only in-memory state: %s", exc)

@@ -28,7 +28,7 @@ HISTORY_TTL = 86400 * 90  # default 90 days
 
 
 async def _get_redis() -> aioredis.Redis:
-    return aioredis.from_url(settings.redis_url, decode_responses=True)
+    return aioredis.from_url(settings.get_redis_url(), decode_responses=True)
 
 
 async def store_analysis(state: VigilState) -> None:

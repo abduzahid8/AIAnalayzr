@@ -11,6 +11,7 @@ expo-env.d.ts
 
 # Native
 .kotlin/
+*.ipa
 *.orig.*
 *.jks
 *.p8
@@ -31,6 +32,7 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
@@ -39,3 +41,4 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+.vercel

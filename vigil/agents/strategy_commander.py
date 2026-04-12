@@ -1,7 +1,10 @@
-"""Agent 7 – StrategyCommander (Tier 3 – Multi-Step Executive)
+"""Agent 7 – StrategyCommander (Tier 3 – Executive with Scenario Modeling)
 
 Consumes the full blackboard state including debate results, validation
-output, and fingerprint data to produce a 30-day strategic playbook.
+output, risk cascades, stress scenarios, and fingerprint data to produce:
+  - 30-day strategic playbook with actions tied to specific risk themes
+  - 3-scenario probability-weighted model (best/base/worst case)
+  - Signal feed grounded in real data
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from typing import Any
 
 from vigil.core.state import (
     AgentConfidence,
+    ScenarioModel,
     SignalFeedItem,
     StrategicAction,
     StrategyCommanderOutput,
@@ -27,28 +31,44 @@ SYSTEM_PROMPT = """\
 <mission>
 You are the final agent in the Vigil pipeline.  You receive the COMPLETE
 intelligence picture: real data signals, agent analyses with confidence
-scores, debate results, validation output, risk themes, anomaly flags,
-and the computed risk score.
+scores, debate results, validation output, risk cascades, stress test
+results, and the computed risk score.
 
-Your job is to produce a complete executive output package that is
-GROUNDED in this intelligence, not generic advice.
+You must produce TWO outputs:
 
-If risk themes mention specific regulatory threats, your actions must
-address those specific threats.  If anomaly flags were raised, address
-them explicitly.  If the validation layer overrode a tier, explain why.
+OUTPUT 1 — STRATEGIC PLAYBOOK:
+  - Executive headline and summary tied to real data
+  - 3-5 actions, each addressing a specific risk theme or cascade
+  - Signal feed from real indicators
+
+OUTPUT 2 — THREE-SCENARIO MODEL:
+  Model three possible futures with probability weights:
+  - BEST CASE: What could go RIGHT? Which risks might not materialize?
+    Assign a lower risk score and explain what drives it.
+  - BASE CASE: Most likely outcome given current signals.
+    Usually close to the computed risk score.
+  - WORST CASE: What if key risk cascades trigger? Reference specific
+    stress scenarios and cascades from the analysis.
+
+  The three probabilities must sum to 1.0.
+  The expected_value_score = sum(case_score * case_probability).
+
+If risk cascades show a chain reaction (A triggers B triggers C),
+your worst case should model the full cascade.  Your actions should
+include a "circuit breaker" action to interrupt the cascade early.
 </mission>
 <output_format>
-Return ONLY valid JSON matching this schema:
+Return ONLY valid JSON:
 {{
-  "executive_summary": "2-4 sentence C-suite briefing referencing specific risks",
-  "executive_headline": "Single line: '[Company] faces [X]% risk exposure — planning window open for ~[N] days before conditions reset.'",
-  "planning_window": "e.g. '~45 days' or '2-3 weeks'",
+  "executive_summary": "2-4 sentence C-suite briefing referencing specific risks and cascades",
+  "executive_headline": "[Company] faces [X]% risk — [key insight from scenario model]",
+  "planning_window": "e.g. '~45 days'",
   "market_mode": "RISK-ON" | "RISK-OFF" | "TRANSITIONAL" | "SELECTIVE DEPLOY" | "CRISIS",
   "actions": [
     {{
       "action_id": 1,
-      "title": "short action title addressing a specific risk theme",
-      "description": "detailed action with rationale tied to real data",
+      "title": "short action title addressing a specific risk theme or cascade",
+      "description": "detailed action with rationale tied to real data and cascade chain",
       "deadline": "YYYY-MM-DDTHH:MM:SSZ",
       "priority": "CRITICAL" | "HIGH" | "MEDIUM"
     }}
@@ -59,16 +79,28 @@ Return ONLY valid JSON matching this schema:
       "delta": "+2.3%" or "-1.5%" or "stable",
       "sentiment": "positive" | "negative" | "neutral" | "warning"
     }}
-  ]
+  ],
+  "scenario_model": {{
+    "best_case": "2-3 sentences: what goes right, which risks don't materialize",
+    "best_case_score": <float 0-100, lower than base>,
+    "best_case_probability": <float, typically 0.15-0.30>,
+    "base_case": "2-3 sentences: most likely outcome given current data",
+    "base_case_score": <float 0-100, close to computed risk score>,
+    "base_case_probability": <float, typically 0.45-0.55>,
+    "worst_case": "2-3 sentences: cascade triggers, stress scenarios materialize",
+    "worst_case_score": <float 0-100, higher than base>,
+    "worst_case_probability": <float, typically 0.15-0.30>
+  }}
 }}
 </output_format>
 <constraints>
-- Generate 3-5 actions.  Each deadline MUST be ISO-8601 and within the next 30 days.
-- Actions must address SPECIFIC risk themes identified in the analysis.
-- Each action should reference which risk theme it mitigates.
+- Generate 3-5 actions.  Each deadline MUST be ISO-8601 within the next 30 days.
+- Actions must reference specific risk themes or cascades.
+- Include at least one "cascade interruptor" action if cascades were identified.
+- Scenario probabilities MUST sum to 1.0 (within rounding).
+- Best case score < base case score < worst case score.
+- Each scenario must reference specific data points, not generic text.
 - Generate 4-6 signal feed items from REAL data indicators.
-- executive_headline must reference the company name, risk score, and timing.
-- market_mode should reflect the current market posture for this company.
 </constraints>
 """
 
@@ -104,12 +136,30 @@ def _build_briefing_context(state: VigilState) -> str:
         for t in risk.risk_themes:
             sections.append(f"  [{t.severity:.0f}%] {t.name} ({t.category}): {t.description}")
 
+    if risk and risk.risk_cascades:
+        sections.append("\n=== Risk Cascades (cause -> effect chains) ===")
+        for c in risk.risk_cascades:
+            sections.append(
+                f"  {c.trigger_theme} -> {c.affected_theme} "
+                f"(prob={c.cascade_probability:.0%}, horizon={c.time_horizon}): "
+                f"{c.mechanism}"
+            )
+
+    if risk and risk.stress_scenarios:
+        sections.append("\n=== Stress Test Results ===")
+        for s in risk.stress_scenarios:
+            sections.append(
+                f"  [{s.scenario_id}] {s.name}: {s.trigger} "
+                f"(impact=+{s.score_impact:.0f} -> {s.resulting_tier}, "
+                f"prob={s.probability:.0%})"
+            )
+            sections.append(f"    {s.description}")
+
     if risk and risk.anomaly_flags:
         sections.append("\n=== Anomaly Flags ===")
         for a in risk.anomaly_flags:
             sections.append(f"  [{a.severity}] {a.description}")
 
-    # Debate results
     if state.debate_result:
         sections.extend([
             "",
@@ -119,7 +169,6 @@ def _build_briefing_context(state: VigilState) -> str:
             f"Summary: {state.debate_result.debate_summary}",
         ])
 
-    # Validation results
     if state.validation_result:
         sections.extend([
             "",
@@ -129,7 +178,16 @@ def _build_briefing_context(state: VigilState) -> str:
             f"Summary: {state.validation_result.validation_summary}",
         ])
 
-    # Fingerprint
+    if state.red_team_result:
+        sections.extend([
+            "",
+            "=== Red Team Challenge ===",
+            f"Vulnerabilities Found: {len(state.red_team_result.get('vulnerabilities', []))}",
+            f"Overall Robustness: {state.red_team_result.get('robustness_score', 'N/A')}",
+        ])
+        for v in state.red_team_result.get("vulnerabilities", [])[:3]:
+            sections.append(f"  - [{v.get('severity', '?')}] {v.get('attack', '')}: {v.get('finding', '')}")
+
     if state.fingerprint and state.fingerprint.historical_avg_score is not None:
         sections.extend([
             "",
@@ -208,10 +266,11 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
         f"{(now + timedelta(days=30)).strftime('%Y-%m-%d')}\n\n"
         f"{context}\n"
         f"{data_summary_str}\n"
-        "Produce the full executive output: headline, summary, actions tied to specific risk themes, signal feed, and market mode."
+        "Produce the full executive output: headline, summary, actions tied to specific risk themes "
+        "and cascades, signal feed, market mode, AND the three-scenario model."
     )
 
-    data = await llm_json(SYSTEM_PROMPT, user_msg, max_tokens=4000)
+    data = await llm_json(SYSTEM_PROMPT, user_msg, max_tokens=5000)
 
     actions_raw = data.get("actions", [])[:5]
     actions = []
@@ -243,6 +302,9 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
             sentiment=f.get("sentiment", "neutral"),
         ))
 
+    scenario_raw = data.get("scenario_model", {})
+    scenario_model = _build_scenario_model(scenario_raw, state)
+
     state.strategy_commander = StrategyCommanderOutput(
         executive_summary=data.get("executive_summary", ""),
         executive_headline=data.get("executive_headline", ""),
@@ -251,6 +313,7 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
         playbook_horizon_days=data.get("playbook_horizon_days", 30),
         signal_feed=signal_feed,
         market_mode=data.get("market_mode", "TRANSITIONAL"),
+        scenario_model=scenario_model,
         confidence=AgentConfidence(
             score=0.8,
             data_quality=data_bundle.data_quality if data_bundle else "sparse",
@@ -258,7 +321,52 @@ async def run(state: VigilState, data_bundle: Any = None) -> VigilState:
     )
 
     logger.info(
-        "StrategyCommander complete – %d actions, %d signals",
+        "StrategyCommander complete – %d actions, %d signals, scenario_EV=%.1f",
         len(actions), len(signal_feed),
+        scenario_model.expected_value_score if scenario_model else 0,
     )
     return state
+
+
+def _build_scenario_model(raw: dict, state: VigilState) -> ScenarioModel:
+    """Build and validate the three-scenario model."""
+    risk_score = 50.0
+    if state.risk_synthesizer:
+        risk_score = state.risk_synthesizer.final_score
+
+    best_score = float(raw.get("best_case_score", max(0, risk_score - 15)))
+    base_score = float(raw.get("base_case_score", risk_score))
+    worst_score = float(raw.get("worst_case_score", min(100, risk_score + 20)))
+
+    if best_score > base_score:
+        best_score = base_score - 5
+    if worst_score < base_score:
+        worst_score = base_score + 5
+
+    best_prob = float(raw.get("best_case_probability", 0.25))
+    base_prob = float(raw.get("base_case_probability", 0.50))
+    worst_prob = float(raw.get("worst_case_probability", 0.25))
+
+    total = best_prob + base_prob + worst_prob
+    if total > 0:
+        best_prob = round(best_prob / total, 2)
+        base_prob = round(base_prob / total, 2)
+        worst_prob = round(1.0 - best_prob - base_prob, 2)
+
+    ev = round(
+        best_score * best_prob + base_score * base_prob + worst_score * worst_prob,
+        2,
+    )
+
+    return ScenarioModel(
+        best_case=raw.get("best_case", ""),
+        best_case_score=round(best_score, 1),
+        best_case_probability=best_prob,
+        base_case=raw.get("base_case", ""),
+        base_case_score=round(base_score, 1),
+        base_case_probability=base_prob,
+        worst_case=raw.get("worst_case", ""),
+        worst_case_score=round(worst_score, 1),
+        worst_case_probability=worst_prob,
+        expected_value_score=ev,
+    )
