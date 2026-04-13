@@ -1,10 +1,13 @@
 import { Platform } from 'react-native';
 
 import type {
+  AnalysisJobStartResponse,
+  AnalysisJobStatusResponse,
   AnalysisRequest,
   AnalysisResponse,
   ChatResponse,
   HealthResponse,
+  SessionSnapshotResponse,
 } from '@/src/types/vigil';
 
 function normalizeBaseUrl(baseUrl: string | undefined) {
@@ -34,6 +37,7 @@ const TIMEOUTS = {
   analyse: 150_000,
   chat: 30_000,
   health: 10_000,
+  poll: 15_000,
 } as const;
 
 async function request<T>(
@@ -96,6 +100,51 @@ export const vigilApi = {
       },
       TIMEOUTS.analyse,
     );
+  },
+  startAnalysis(payload: AnalysisRequest) {
+    return request<AnalysisJobStartResponse>(
+      '/api/v1/analysis/start',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      TIMEOUTS.health,
+    );
+  },
+  analysisStatus(sessionId: string) {
+    return request<AnalysisJobStatusResponse>(
+      `/api/v1/analysis/${encodeURIComponent(sessionId)}/status`,
+      undefined,
+      TIMEOUTS.poll,
+    );
+  },
+  analysisResult(sessionId: string) {
+    return request<AnalysisResponse>(
+      `/api/v1/analysis/${encodeURIComponent(sessionId)}/result`,
+      undefined,
+      TIMEOUTS.health,
+    );
+  },
+  async pollAnalysis(
+    sessionId: string,
+    onProgress: (status: AnalysisJobStatusResponse) => void,
+    pollMs = 2500,
+  ): Promise<AnalysisResponse> {
+    while (true) {
+      const status = await this.analysisStatus(sessionId);
+      onProgress(status);
+
+      if (status.is_failed) {
+        throw new Error(status.errors[0] || 'Analysis failed before producing a result.');
+      }
+
+      if (status.is_complete && status.has_result) {
+        return this.analysisResult(sessionId);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
   },
   async analyseStream(
     payload: AnalysisRequest,
@@ -173,6 +222,20 @@ export const vigilApi = {
         body: JSON.stringify({ session_id: sessionId, message }),
       },
       TIMEOUTS.chat,
+    );
+  },
+  sessionSnapshot(sessionId: string) {
+    return request<SessionSnapshotResponse>(
+      `/session/${encodeURIComponent(sessionId)}/snapshot`,
+      undefined,
+      TIMEOUTS.health,
+    );
+  },
+  purgeSession(sessionId: string) {
+    return request<{ status: string; session_id: string }>(
+      `/session/${encodeURIComponent(sessionId)}`,
+      { method: 'DELETE' },
+      TIMEOUTS.health,
     );
   },
 };

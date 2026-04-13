@@ -72,6 +72,83 @@ const DEFAULT_FORM: FormState = {
   risk_tolerance: '50',
 };
 
+const SECTOR_OPTIONS = [
+  'Technology / AI',
+  'Fintech',
+  'Healthcare',
+  'E-Commerce',
+  'SaaS',
+  'Biotech',
+  'Clean Energy',
+  'Automotive',
+  'Real Estate',
+  'Consumer',
+  'Enterprise',
+  'Other',
+] as const;
+
+const GEOGRAPHY_OPTIONS = ['Global', 'US', 'EU', 'UK', 'Asia', 'MENA'] as const;
+
+const COUNTRY_OPTIONS = [
+  'United States',
+  'United Kingdom',
+  'Germany',
+  'France',
+  'Cyprus',
+  'Singapore',
+  'UAE',
+  'India',
+  'Japan',
+  'Other',
+] as const;
+
+const FUNDING_STAGE_OPTIONS = [
+  'Bootstrapped',
+  'Pre-Seed',
+  'Seed',
+  'Series A',
+  'Series B',
+  'Series C+',
+  'Public',
+] as const;
+
+const ARR_RANGE_OPTIONS = [
+  'Pre-revenue',
+  '<$100K',
+  '$100K-$500K',
+  '$500K-$1M',
+  '$1M-$5M',
+  '$5M-$20M',
+  '$20M+',
+] as const;
+
+const EXPOSURE_OPTIONS = [
+  'Regulatory / Legal',
+  'Interest Rates',
+  'Funding Market',
+  'Supply Chain',
+  'AI / Tech Policy',
+  'Geopolitical',
+  'Currency / FX',
+  'Cyber / Data',
+  'Labor Market',
+  'Consumer Banking',
+  'Tariff / Trade',
+  'Commodity Prices',
+] as const;
+
+const REGULATION_OPTIONS = [
+  'MiCA',
+  'DORA',
+  'GDPR',
+  'EU AI Act',
+  'SOC 2',
+  'HIPAA',
+  'SEC',
+  'PCI DSS',
+  'CCPA',
+] as const;
+
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 function splitCsv(value: string) {
@@ -1003,12 +1080,140 @@ function FormField({
   );
 }
 
+function OptionGroup({
+  label,
+  hint,
+  options,
+  value,
+  onSelect,
+}: {
+  label: string;
+  hint?: string;
+  options: readonly string[];
+  value: string;
+  onSelect: (value: string) => void;
+}) {
+  return (
+    <View style={s.fieldWrap}>
+      <Text style={s.fieldLabel}>{label}</Text>
+      {hint ? <Text style={s.fieldHint}>{hint}</Text> : null}
+      <View style={s.optionGroup}>
+        {options.map((option) => {
+          const active = value === option;
+          return (
+            <Pressable
+              key={option}
+              accessibilityRole="button"
+              onPress={() => onSelect(option)}
+              style={({ pressed }) => [
+                s.optionChip,
+                active && s.optionChipActive,
+                pressed ? s.optionChipPressed : null,
+              ]}
+            >
+              <Text style={[s.optionChipText, active && s.optionChipTextActive]}>{option}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function MultiSelectGroup({
+  label,
+  hint,
+  options,
+  selected,
+  onToggle,
+}: {
+  label: string;
+  hint?: string;
+  options: readonly string[];
+  selected: string[];
+  onToggle: (value: string) => void;
+}) {
+  return (
+    <View style={s.fieldWrap}>
+      <Text style={s.fieldLabel}>{label}</Text>
+      {hint ? <Text style={s.fieldHint}>{hint}</Text> : null}
+      <View style={s.optionGroup}>
+        {options.map((option) => {
+          const active = selected.includes(option);
+          return (
+            <Pressable
+              key={option}
+              accessibilityRole="button"
+              onPress={() => onToggle(option)}
+              style={({ pressed }) => [
+                s.optionChip,
+                active && s.optionChipActive,
+                pressed ? s.optionChipPressed : null,
+              ]}
+            >
+              <Text style={[s.optionChipText, active && s.optionChipTextActive]}>{option}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function RiskToleranceControl({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const numeric = clampPct(Number(value || '50'));
+  return (
+    <View style={s.fieldWrap}>
+      <Text style={s.fieldLabel}>Risk tolerance</Text>
+      <Text style={s.fieldHint}>50 is balanced. Higher means more growth-oriented.</Text>
+      <View style={s.toleranceCard}>
+        <View style={s.toleranceHeader}>
+          <Text style={s.toleranceValue}>{numeric}</Text>
+          <Text style={s.toleranceScale}>0-100</Text>
+        </View>
+        <View style={s.toleranceRail}>
+          <View style={[s.toleranceFill, { width: `${numeric}%` }]} />
+        </View>
+        <View style={s.toleranceLabels}>
+          <Text style={s.toleranceLabel}>Conservative</Text>
+          <Text style={s.toleranceLabel}>Balanced</Text>
+          <Text style={s.toleranceLabel}>Aggressive</Text>
+        </View>
+        <TextInput
+          value={String(numeric)}
+          onChangeText={(next) => onChange(next.replace(/[^0-9]/g, ''))}
+          keyboardType="numeric"
+          maxLength={3}
+          placeholder="50"
+          placeholderTextColor={colors.textDim}
+          style={s.toleranceInput}
+        />
+      </View>
+    </View>
+  );
+}
+
 // ─── Main Screen ─────────────────────────────────────────────────────
 
 export default function AnalyzeScreen() {
-  const { analysis, clearError, isAnalyzing, lastError, resetAnalysis, runAnalysis } = useVigil();
+  const {
+    analysis,
+    clearError,
+    isAnalyzing,
+    lastError,
+    pipelineProgress,
+    resetAnalysis,
+    runAnalysis,
+  } = useVigil();
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
-  const [pipelineStage, setPipelineStage] = useState(-1);
+  const [selectedExposures, setSelectedExposures] = useState<string[]>(splitCsv(DEFAULT_FORM.risk_exposures));
+  const [selectedRegulations, setSelectedRegulations] = useState<string[]>(splitCsv(DEFAULT_FORM.active_regulations));
 
   const isReady = useMemo(
     () => Boolean(form.company_name.trim() && form.description.trim() && form.sector.trim()),
@@ -1020,37 +1225,46 @@ export default function AnalyzeScreen() {
     setForm((cur) => ({ ...cur, [field]: value }));
   };
 
+  const toggleExposure = (value: string) => {
+    clearError();
+    setSelectedExposures((current) => {
+      const next = current.includes(value)
+        ? current.filter((item) => item !== value)
+        : [...current, value];
+      setForm((cur) => ({ ...cur, risk_exposures: next.join(', ') }));
+      return next;
+    });
+  };
+
+  const toggleRegulation = (value: string) => {
+    clearError();
+    setSelectedRegulations((current) => {
+      const next = current.includes(value)
+        ? current.filter((item) => item !== value)
+        : [...current, value];
+      setForm((cur) => ({ ...cur, active_regulations: next.join(', ') }));
+      return next;
+    });
+  };
+
   const handleSubmit = async () => {
     await runAnalysis(buildPayload(form));
   };
 
   const handleNewAnalysis = () => {
     resetAnalysis();
-    setPipelineStage(-1);
+    setForm(DEFAULT_FORM);
+    setSelectedExposures(splitCsv(DEFAULT_FORM.risk_exposures));
+    setSelectedRegulations(splitCsv(DEFAULT_FORM.active_regulations));
   };
-
-  useEffect(() => {
-    if (!isAnalyzing) {
-      if (analysis) {
-        setPipelineStage(AGENT_STAGES.length - 1);
-        const reset = setTimeout(() => setPipelineStage(-1), 1200);
-        return () => clearTimeout(reset);
-      }
-      return;
-    }
-    setPipelineStage(0);
-    const maxStage = AGENT_STAGES.length - 2;
-    const interval = setInterval(() => {
-      setPipelineStage((prev) => {
-        if (prev >= maxStage) return maxStage;
-        return prev + 1;
-      });
-    }, 8000);
-    return () => clearInterval(interval);
-  }, [isAnalyzing, analysis]);
 
   const showIntro = !analysis && !isAnalyzing;
   const showResults = Boolean(analysis) && !isAnalyzing;
+  const pipelineStage = pipelineProgress
+    ? Math.max(0, Math.min(AGENT_STAGES.length - 1, pipelineProgress.current - 1))
+    : isAnalyzing
+      ? 0
+      : -1;
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.content}>
@@ -1085,13 +1299,12 @@ export default function AnalyzeScreen() {
               autoCapitalize="none"
               maxLength={300}
             />
-            <FormField
+            <OptionGroup
               label="Sector"
               hint="Drives sector betas, regulatory priors, and peer screens."
-              placeholder="Technology / AI"
+              options={SECTOR_OPTIONS}
               value={form.sector}
-              onChangeText={(v) => updateField('sector', v)}
-              maxLength={100}
+              onSelect={(v) => updateField('sector', v)}
             />
             <FormField
               label="What does the company do?"
@@ -1105,38 +1318,38 @@ export default function AnalyzeScreen() {
 
             <View style={s.grid}>
               <View style={s.gridItem}>
-                <FormField
+                <OptionGroup
                   label="Country"
-                  placeholder="United States"
+                  options={COUNTRY_OPTIONS}
                   value={form.country}
-                  onChangeText={(v) => updateField('country', v)}
+                  onSelect={(v) => updateField('country', v)}
                 />
               </View>
               <View style={s.gridItem}>
-                <FormField
+                <OptionGroup
                   label="Geography"
-                  placeholder="Global"
+                  options={GEOGRAPHY_OPTIONS}
                   value={form.geography}
-                  onChangeText={(v) => updateField('geography', v)}
+                  onSelect={(v) => updateField('geography', v)}
                 />
               </View>
             </View>
 
             <View style={s.grid}>
               <View style={s.gridItem}>
-                <FormField
+                <OptionGroup
                   label="Funding stage"
-                  placeholder="Seed"
+                  options={FUNDING_STAGE_OPTIONS}
                   value={form.funding_stage}
-                  onChangeText={(v) => updateField('funding_stage', v)}
+                  onSelect={(v) => updateField('funding_stage', v)}
                 />
               </View>
               <View style={s.gridItem}>
-                <FormField
+                <OptionGroup
                   label="ARR range"
-                  placeholder="$1M–$5M"
+                  options={ARR_RANGE_OPTIONS}
                   value={form.arr_range}
-                  onChangeText={(v) => updateField('arr_range', v)}
+                  onSelect={(v) => updateField('arr_range', v)}
                 />
               </View>
             </View>
@@ -1148,28 +1361,23 @@ export default function AnalyzeScreen() {
               value={form.operating_in}
               onChangeText={(v) => updateField('operating_in', v)}
             />
-            <FormField
+            <MultiSelectGroup
               label="Key risk exposures"
-              hint="Themes you already worry about (comma-separated)."
-              placeholder="AI / Tech Policy, Cyber / Data"
-              value={form.risk_exposures}
-              onChangeText={(v) => updateField('risk_exposures', v)}
+              hint="Themes you already worry about."
+              options={EXPOSURE_OPTIONS}
+              selected={selectedExposures}
+              onToggle={toggleExposure}
             />
-            <FormField
+            <MultiSelectGroup
               label="Active regulations"
               hint="Hard legal frameworks the agents must respect."
-              placeholder="GDPR, EU AI Act"
-              value={form.active_regulations}
-              onChangeText={(v) => updateField('active_regulations', v)}
+              options={REGULATION_OPTIONS}
+              selected={selectedRegulations}
+              onToggle={toggleRegulation}
             />
-            <FormField
-              label="Risk tolerance (0–100)"
-              hint="50 is balanced. Higher = more growth-oriented."
-              placeholder="50"
+            <RiskToleranceControl
               value={form.risk_tolerance}
-              onChangeText={(v) => updateField('risk_tolerance', v.replace(/[^0-9]/g, ''))}
-              keyboardType="numeric"
-              maxLength={3}
+              onChange={(v) => updateField('risk_tolerance', v)}
             />
 
             {lastError ? (
@@ -2069,6 +2277,35 @@ const s = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
   },
+  optionGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
+  },
+  optionChip: {
+    backgroundColor: colors.surfaceRaised,
+    borderColor: colors.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  optionChipActive: {
+    backgroundColor: colors.goldMuted,
+    borderColor: colors.gold,
+  },
+  optionChipPressed: {
+    opacity: 0.8,
+  },
+  optionChipText: {
+    fontFamily: fonts.sansMedium,
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  optionChipTextActive: {
+    color: colors.text,
+  },
   input: {
     backgroundColor: colors.surfaceRaised,
     borderColor: colors.border,
@@ -2082,6 +2319,63 @@ const s = StyleSheet.create({
     marginTop: 4,
   },
   textArea: { minHeight: 110 },
+  toleranceCard: {
+    backgroundColor: colors.surfaceRaised,
+    borderColor: colors.border,
+    borderRadius: 6,
+    borderWidth: 1,
+    padding: 14,
+    gap: 10,
+    marginTop: 6,
+  },
+  toleranceHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+  },
+  toleranceValue: {
+    fontFamily: fonts.serif,
+    color: colors.gold,
+    fontSize: 30,
+  },
+  toleranceScale: {
+    fontFamily: fonts.mono,
+    color: colors.textDim,
+    fontSize: 11,
+    letterSpacing: 1.5,
+  },
+  toleranceRail: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.border,
+    overflow: 'hidden',
+  },
+  toleranceFill: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.gold,
+  },
+  toleranceLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  toleranceLabel: {
+    fontFamily: fonts.sans,
+    color: colors.textDim,
+    fontSize: 11,
+  },
+  toleranceInput: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderRadius: 4,
+    borderWidth: 1,
+    color: colors.text,
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
   grid: { flexDirection: 'row', gap: 12, flexWrap: 'wrap' },
   gridItem: { flex: 1, minWidth: 150 },
 

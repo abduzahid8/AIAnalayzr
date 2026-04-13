@@ -281,6 +281,73 @@ class ChatResponse(BaseModel):
     suggested_action: str | None = None
 
 
+class ChatHistoryItemResponse(BaseModel):
+    role: str
+    content: str
+    timestamp: str
+
+
+class SessionSnapshotResponse(BaseModel):
+    session_id: str
+    stage: str
+    company: str
+    analysis: AnalysisResponse | None = None
+    chat_history: list[ChatHistoryItemResponse] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class AnalysisJobStartResponse(BaseModel):
+    session_id: str
+    stage: str
+    company: str
+    status_url: str
+    result_url: str
+
+
+class AnalysisJobStatusResponse(BaseModel):
+    session_id: str
+    stage: str
+    company: str
+    detail: str
+    current_stage: int
+    total_stages: int
+    is_complete: bool
+    is_failed: bool
+    has_result: bool
+    errors: list[str] = Field(default_factory=list)
+
+
+PIPELINE_STAGES = [
+    "data_fetch",
+    "tier1",
+    "debate",
+    "red_team",
+    "tier2",
+    "validation",
+    "tier3",
+]
+
+PIPELINE_STAGE_DETAILS = {
+    "INIT": "Queued for analysis.",
+    "DATA_FETCH": "Fetching market data, news, SEC filings, and Reddit.",
+    "TIER1_RUNNING": "Running parallel agent analysis.",
+    "TIER1_DONE": "Parallel agent analysis complete.",
+    "DEBATE_RUNNING": "Cross-validating agent outputs.",
+    "DEBATE_DONE": "Debate layer complete.",
+    "RED_TEAM_RUNNING": "Running adversarial challenge.",
+    "RED_TEAM_DONE": "Adversarial challenge complete.",
+    "TIER2_RUNNING": "Synthesizing the final risk score.",
+    "TIER2_DONE": "Risk synthesis complete.",
+    "VALIDATION_RUNNING": "Validating output quality.",
+    "VALIDATION_DONE": "Validation complete.",
+    "TIER3_RUNNING": "Generating executive strategy and scenario model.",
+    "COMPLETE": "Analysis complete.",
+    "FAILED": "Analysis failed.",
+}
+
+_analysis_tasks: dict[str, asyncio.Task] = {}
+
+
 # ── DAG Orchestrator ─────────────────────────────────────────────────
 
 async def _run_agent_safe(
@@ -654,24 +721,170 @@ def _build_analysis_response(
 
 def _build_profile(req: AnalysisRequest) -> CompanyProfile:
     """Build a sanitized CompanyProfile from the request."""
+    operating_in = [
+        sanitize_input(item, max_length=100)
+        for item in req.operating_in
+        if item and item.strip()
+    ]
+    risk_exposures = [
+        sanitize_input(item, max_length=100)
+        for item in req.risk_exposures
+        if item and item.strip()
+    ]
+    active_regulations = [
+        sanitize_input(item, max_length=100)
+        for item in req.active_regulations
+        if item and item.strip()
+    ]
     return CompanyProfile(
         name=sanitize_input(req.company_name, max_length=200),
         ticker=sanitize_input(req.ticker, max_length=10) if req.ticker else None,
-        website=req.website,
+        website=sanitize_input(req.website, max_length=300) if req.website else None,
         sector=sanitize_input(req.sector, max_length=100) if req.sector else None,
         subsector=sanitize_input(req.subsector, max_length=100) if req.subsector else None,
         description=sanitize_input(req.description, max_length=2000),
         geography=sanitize_input(req.geography, max_length=50),
         country=sanitize_input(req.country, max_length=100),
-        operating_in=req.operating_in,
-        arr_range=req.arr_range,
-        funding_stage=req.funding_stage,
-        runway=req.runway,
-        team_size=req.team_size,
-        revenue_currency=req.revenue_currency,
-        risk_exposures=req.risk_exposures,
-        active_regulations=req.active_regulations,
+        operating_in=operating_in,
+        arr_range=sanitize_input(req.arr_range, max_length=100) if req.arr_range else None,
+        funding_stage=sanitize_input(req.funding_stage, max_length=100) if req.funding_stage else None,
+        runway=sanitize_input(req.runway, max_length=100) if req.runway else None,
+        team_size=sanitize_input(req.team_size, max_length=100) if req.team_size else None,
+        revenue_currency=sanitize_input(req.revenue_currency, max_length=20),
+        risk_exposures=risk_exposures,
+        active_regulations=active_regulations,
         risk_tolerance=req.risk_tolerance,
+    )
+
+
+async def _build_analysis_response_from_state(
+    req: AnalysisRequest,
+    state: VigilState,
+) -> AnalysisResponse:
+    """Build a user-facing analysis response from a completed session state."""
+    risk = state.risk_synthesizer
+    strat = state.strategy_commander
+    oracle = state.market_oracle
+    basic_correlations = correlation_engine.compute_correlations(state)
+    divergence = correlation_engine.compute_divergence_index(state)
+    advanced_corr = correlation_engine.compute_advanced_correlations(state)
+
+    temporal_velocity = None
+    temporal_direction = None
+    if risk:
+        temporal = await compute_temporal_delta(
+            state.company.sector, risk.final_score, state.company.geography,
+        )
+        temporal_velocity = temporal.sector_velocity
+        temporal_direction = temporal.sector_direction
+
+    elapsed = state.pipeline_duration_seconds or 0.0
+    t0 = time.monotonic() - elapsed
+    return _build_analysis_response(
+        req, state, risk, strat, oracle,
+        basic_correlations, divergence, advanced_corr,
+        temporal_velocity, temporal_direction,
+        t0,
+    )
+
+
+def _request_from_state(state: VigilState) -> AnalysisRequest:
+    """Reconstruct an analysis request from session state."""
+    return AnalysisRequest(
+        company_name=state.company.name,
+        ticker=state.company.ticker,
+        website=state.company.website,
+        sector=state.company.sector,
+        subsector=state.company.subsector,
+        description=state.company.description,
+        geography=state.company.geography,
+        country=state.company.country,
+        operating_in=state.company.operating_in,
+        arr_range=state.company.arr_range,
+        funding_stage=state.company.funding_stage,
+        runway=state.company.runway,
+        team_size=state.company.team_size,
+        revenue_currency=state.company.revenue_currency,
+        risk_exposures=state.company.risk_exposures,
+        active_regulations=state.company.active_regulations,
+        risk_tolerance=state.company.risk_tolerance,
+    )
+
+
+def _progress_index_for_stage(stage: str) -> int:
+    stage_map = {
+        "DATA_FETCH": 1,
+        "TIER1_RUNNING": 2,
+        "TIER1_DONE": 2,
+        "DEBATE_RUNNING": 3,
+        "DEBATE_DONE": 3,
+        "RED_TEAM_RUNNING": 4,
+        "RED_TEAM_DONE": 4,
+        "TIER2_RUNNING": 5,
+        "TIER2_DONE": 5,
+        "VALIDATION_RUNNING": 6,
+        "VALIDATION_DONE": 6,
+        "TIER3_RUNNING": 7,
+        "COMPLETE": 7,
+    }
+    return stage_map.get(stage, 0)
+
+
+async def _run_pipeline_job(state: VigilState) -> None:
+    """Execute a queued analysis job and persist final state."""
+    started_at = time.monotonic()
+    try:
+        state = await run_pipeline(state)
+        state.pipeline_duration_seconds = round(time.monotonic() - started_at, 2)
+        await save_state(state)
+    except Exception as exc:
+        state.stage = PipelineStage.FAILED
+        state.errors.append(f"Pipeline fatal: {exc!s}")
+        state.pipeline_duration_seconds = round(time.monotonic() - started_at, 2)
+        await save_state(state)
+        logger.error("Async analysis failed for %s: %s", state.session_id, exc, exc_info=True)
+    finally:
+        _analysis_tasks.pop(state.session_id, None)
+
+
+async def _chat_with_session(session_id: str, message: str) -> ChatResponse:
+    """Run advisor chat for an existing analysis session."""
+    state = await load_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Session not found or expired. Run an analysis first.")
+
+    context = _build_chat_context(state)
+    system_prompt = CHAT_SYSTEM_PROMPT.format(context=context)
+
+    messages_context = ""
+    for msg in state.chat_history[-10:]:
+        messages_context += f"\n[{msg.role.upper()}]: {msg.content}"
+
+    clean_message = sanitize_input(message, max_length=2000)
+    user_message = f"Conversation so far:{messages_context}\n\n[USER]: {clean_message}\n\nProvide your strategic advice."
+
+    try:
+        reply = await llm_complete(
+            system_prompt, user_message,
+            temperature=0.4, max_tokens=2000,
+        )
+    except Exception as exc:
+        logger.error("Chat LLM call failed for session %s: %s", session_id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="AI advisor is temporarily unavailable. Please try again.",
+        )
+
+    state.chat_history.append(ChatMessage(role="user", content=clean_message))
+    state.chat_history.append(ChatMessage(role="assistant", content=reply))
+    await save_state(state)
+
+    risk = state.risk_synthesizer
+    return ChatResponse(
+        session_id=session_id,
+        reply=reply,
+        risk_score=risk.final_score if risk else None,
+        risk_tier=risk.risk_tier.value if risk else None,
     )
 
 
@@ -701,6 +914,8 @@ async def analyse_company(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     elapsed = time.monotonic() - t0
+    state.pipeline_duration_seconds = round(elapsed, 2)
+    await save_state(state)
 
     risk = state.risk_synthesizer
     strat = state.strategy_commander
@@ -730,49 +945,103 @@ async def analyse_company(
 @app.post("/chat", response_model=ChatResponse, tags=["Chat"])
 async def chat_advisor(
     req: ChatRequest,
+    request: Request,
     _auth=Security(verify_api_key),
 ) -> ChatResponse:
     """Conversational strategic advisor using the analysis context."""
-    state = await load_state(req.session_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="Session not found or expired. Run an analysis first.")
+    _check_rate_limit(request.client.host if request.client else "unknown")
+    return await _chat_with_session(req.session_id, req.message)
 
-    context = _build_chat_context(state)
-    system_prompt = CHAT_SYSTEM_PROMPT.format(context=context)
 
-    messages_context = ""
-    for msg in state.chat_history[-10:]:
-        messages_context += f"\n[{msg.role.upper()}]: {msg.content}"
-
-    user_message = f"Conversation so far:{messages_context}\n\n[USER]: {req.message}\n\nProvide your strategic advice."
-
-    try:
-        reply = await llm_complete(
-            system_prompt, user_message,
-            temperature=0.4, max_tokens=2000,
-        )
-    except Exception as exc:
-        logger.error("Chat LLM call failed for session %s: %s", req.session_id, exc)
-        raise HTTPException(
-            status_code=502,
-            detail="AI advisor is temporarily unavailable. Please try again.",
-        )
-
-    state.chat_history.append(ChatMessage(role="user", content=req.message))
-    state.chat_history.append(ChatMessage(role="assistant", content=reply))
+@app.post("/api/v1/analysis/start", response_model=AnalysisJobStartResponse, tags=["Analysis"])
+async def start_analysis_job(
+    req: AnalysisRequest,
+    request: Request,
+    _auth=Security(verify_api_key),
+) -> AnalysisJobStartResponse:
+    """Queue an analysis job and return polling endpoints."""
+    _check_rate_limit(request.client.host if request.client else "unknown")
+    state = VigilState(company=_build_profile(req))
     await save_state(state)
 
-    risk = state.risk_synthesizer
-    return ChatResponse(
-        session_id=req.session_id,
-        reply=reply,
-        risk_score=risk.final_score if risk else None,
-        risk_tier=risk.risk_tier.value if risk else None,
+    task = asyncio.create_task(_run_pipeline_job(state))
+    _analysis_tasks[state.session_id] = task
+
+    return AnalysisJobStartResponse(
+        session_id=state.session_id,
+        stage=state.stage.value,
+        company=state.company.name,
+        status_url=f"/api/v1/analysis/{state.session_id}/status",
+        result_url=f"/api/v1/analysis/{state.session_id}/result",
     )
 
 
+@app.get("/api/v1/analysis/{session_id}/status", response_model=AnalysisJobStatusResponse, tags=["Analysis"])
+async def get_analysis_job_status(
+    session_id: str,
+    _auth=Security(verify_api_key),
+) -> AnalysisJobStatusResponse:
+    """Poll the status of an async analysis job."""
+    state = await load_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+
+    stage_value = state.stage.value
+    current_stage = _progress_index_for_stage(stage_value)
+    is_complete = state.stage == PipelineStage.COMPLETE
+    is_failed = state.stage == PipelineStage.FAILED
+
+    return AnalysisJobStatusResponse(
+        session_id=state.session_id,
+        stage=stage_value,
+        company=state.company.name,
+        detail=PIPELINE_STAGE_DETAILS.get(stage_value, "Analysis in progress."),
+        current_stage=current_stage,
+        total_stages=len(PIPELINE_STAGES),
+        is_complete=is_complete,
+        is_failed=is_failed,
+        has_result=is_complete and state.strategy_commander is not None and state.risk_synthesizer is not None,
+        errors=state.errors,
+    )
+
+
+@app.get("/api/v1/analysis/{session_id}/result", response_model=AnalysisResponse, tags=["Analysis"])
+async def get_analysis_job_result(
+    session_id: str,
+    _auth=Security(verify_api_key),
+) -> AnalysisResponse:
+    """Fetch the final result of a completed async analysis job."""
+    state = await load_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+    if state.stage == PipelineStage.FAILED:
+        raise HTTPException(status_code=409, detail="Analysis failed before producing a result.")
+    if state.stage != PipelineStage.COMPLETE or not state.strategy_commander or not state.risk_synthesizer:
+        raise HTTPException(status_code=202, detail="Analysis is still running.")
+
+    req = _request_from_state(state)
+    return await _build_analysis_response_from_state(req, state)
+
+
+@app.post("/api/v1/analysis/{session_id}/chat", response_model=ChatResponse, tags=["Chat"])
+async def chat_analysis_job(
+    session_id: str,
+    req: ChatRequest,
+    request: Request,
+    _auth=Security(verify_api_key),
+) -> ChatResponse:
+    """Chat against a completed or in-progress analysis session."""
+    _check_rate_limit(request.client.host if request.client else "unknown")
+    if req.session_id != session_id:
+        raise HTTPException(status_code=400, detail="Session id mismatch between path and body.")
+    return await _chat_with_session(session_id, req.message)
+
+
 @app.get("/session/{session_id}", response_model=SessionStatusResponse, tags=["Session"])
-async def get_session(session_id: str) -> SessionStatusResponse:
+async def get_session(
+    session_id: str,
+    _auth=Security(verify_api_key),
+) -> SessionStatusResponse:
     """Retrieve the current state of an analysis session."""
     state = await load_state(session_id)
     if state is None:
@@ -785,8 +1054,43 @@ async def get_session(session_id: str) -> SessionStatusResponse:
     )
 
 
+@app.get("/session/{session_id}/snapshot", response_model=SessionSnapshotResponse, tags=["Session"])
+async def get_session_snapshot(
+    session_id: str,
+    _auth=Security(verify_api_key),
+) -> SessionSnapshotResponse:
+    """Retrieve a safe, product-facing session snapshot for client restore."""
+    state = await load_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+
+    analysis = None
+    if state.stage == PipelineStage.COMPLETE and state.strategy_commander and state.risk_synthesizer:
+        req = _request_from_state(state)
+        analysis = await _build_analysis_response_from_state(req, state)
+
+    return SessionSnapshotResponse(
+        session_id=state.session_id,
+        stage=state.stage.value,
+        company=state.company.name,
+        analysis=analysis,
+        chat_history=[
+            ChatHistoryItemResponse(
+                role=msg.role,
+                content=msg.content,
+                timestamp=msg.timestamp,
+            )
+            for msg in state.chat_history
+        ],
+        errors=state.errors,
+    )
+
+
 @app.get("/session/{session_id}/full", tags=["Session"])
-async def get_session_full(session_id: str) -> dict:
+async def get_session_full(
+    session_id: str,
+    _auth=Security(verify_api_key),
+) -> dict:
     """Retrieve the complete blackboard state for a session."""
     state = await load_state(session_id)
     if state is None:
@@ -795,7 +1099,10 @@ async def get_session_full(session_id: str) -> dict:
 
 
 @app.delete("/session/{session_id}", tags=["Session"])
-async def purge_session(session_id: str) -> dict:
+async def purge_session(
+    session_id: str,
+    _auth=Security(verify_api_key),
+) -> dict:
     """Delete a session from Redis."""
     await delete_state(session_id)
     return {"status": "deleted", "session_id": session_id}
@@ -846,11 +1153,6 @@ async def serve_dashboard():
 
 # ── SSE Streaming Endpoint ────────────────────────────────────────────
 
-PIPELINE_STAGES = [
-    "data_fetch", "tier1", "debate", "red_team",
-    "tier2", "validation", "tier3",
-]
-
 
 @app.post("/analyse/stream", tags=["Analysis"])
 async def analyse_stream(
@@ -874,31 +1176,12 @@ async def analyse_stream(
 
     async def run_in_background():
         state = VigilState(company=_build_profile(req))
+        started_at = time.monotonic()
         try:
             state = await run_pipeline(state, progress_cb=progress_cb)
-
-            risk = state.risk_synthesizer
-            strat = state.strategy_commander
-            oracle = state.market_oracle
-            basic_correlations = correlation_engine.compute_correlations(state)
-            divergence = correlation_engine.compute_divergence_index(state)
-            advanced_corr = correlation_engine.compute_advanced_correlations(state)
-
-            temporal_velocity = None
-            temporal_direction = None
-            if risk:
-                temporal = await compute_temporal_delta(
-                    state.company.sector, risk.final_score, state.company.geography,
-                )
-                temporal_velocity = temporal.sector_velocity
-                temporal_direction = temporal.sector_direction
-
-            response = _build_analysis_response(
-                req, state, risk, strat, oracle,
-                basic_correlations, divergence, advanced_corr,
-                temporal_velocity, temporal_direction,
-                time.monotonic(),
-            )
+            state.pipeline_duration_seconds = round(time.monotonic() - started_at, 2)
+            await save_state(state)
+            response = await _build_analysis_response_from_state(req, state)
             await queue.put({"type": "complete", "data": response.model_dump()})
 
         except Exception as exc:

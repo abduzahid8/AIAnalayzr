@@ -319,6 +319,7 @@ class VigilState(BaseModel):
     # Metadata
     data_quality: str = "sparse"
     data_sources: list[str] = Field(default_factory=list)
+    pipeline_duration_seconds: float | None = None
 
     chat_history: list[ChatMessage] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)

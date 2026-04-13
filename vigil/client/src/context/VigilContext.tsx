@@ -13,6 +13,8 @@ import { vigilApi, type StreamEvent } from '@/src/lib/api';
 import type {
   AnalysisRequest,
   AnalysisResponse,
+  AnalysisJobStatusResponse,
+  ChatHistoryItem,
   ChatMessage,
 } from '@/src/types/vigil';
 
@@ -51,6 +53,15 @@ function createMessage(role: ChatMessage['role'], content: string, meta?: string
   };
 }
 
+function fromHistoryItem(item: ChatHistoryItem): ChatMessage {
+  return {
+    id: `${item.role}-${item.timestamp}`,
+    role: item.role,
+    content: item.content,
+    meta: new Date(item.timestamp).toLocaleString(),
+  };
+}
+
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
     return error.message;
@@ -68,6 +79,15 @@ function getDefaultAssistantMessage(company?: string) {
   );
 }
 
+function toPipelineProgress(status: AnalysisJobStatusResponse): PipelineProgress {
+  return {
+    stage: status.stage,
+    detail: status.detail,
+    current: status.current_stage,
+    total: status.total_stages,
+  };
+}
+
 export function VigilProvider({ children }: PropsWithChildren) {
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -80,9 +100,34 @@ export function VigilProvider({ children }: PropsWithChildren) {
   const [pipelineProgress, setPipelineProgress] = useState<PipelineProgress | null>(null);
 
   useEffect(() => {
-    AsyncStorage.getItem(SESSION_KEY).then((stored) => {
-      if (stored && !sessionId) setSessionId(stored);
+    let cancelled = false;
+
+    AsyncStorage.getItem(SESSION_KEY).then(async (stored) => {
+      if (!stored || cancelled || sessionId) return;
+
+      setSessionId(stored);
+      try {
+        const snapshot = await vigilApi.sessionSnapshot(stored);
+        if (cancelled) return;
+
+        setAnalysis(snapshot.analysis);
+        setChatMessages(
+          snapshot.chat_history.length
+            ? snapshot.chat_history.map(fromHistoryItem)
+            : [getDefaultAssistantMessage(snapshot.company)],
+        );
+      } catch {
+        if (cancelled) return;
+        setSessionId(null);
+        setAnalysis(null);
+        setChatMessages([getDefaultAssistantMessage()]);
+        AsyncStorage.removeItem(SESSION_KEY);
+      }
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const clearError = useCallback(() => {
@@ -90,12 +135,15 @@ export function VigilProvider({ children }: PropsWithChildren) {
   }, []);
 
   const resetAnalysis = useCallback(() => {
+    if (sessionId) {
+      void vigilApi.purgeSession(sessionId).catch(() => undefined);
+    }
     setAnalysis(null);
     setSessionId(null);
     setLastError(null);
     setChatMessages([getDefaultAssistantMessage()]);
     AsyncStorage.removeItem(SESSION_KEY);
-  }, []);
+  }, [sessionId]);
 
   const runAnalysis = useCallback(async (payload: AnalysisRequest) => {
     setIsAnalyzing(true);
@@ -117,23 +165,40 @@ export function VigilProvider({ children }: PropsWithChildren) {
     };
 
     try {
-      const result = await vigilApi.analyseStream(payload, (event: StreamEvent) => {
-        if (event.type === 'progress') {
-          setPipelineProgress({
-            stage: event.stage,
-            detail: event.detail,
-            current: event.current_stage,
-            total: event.total_stages,
-          });
-        }
+      const job = await vigilApi.startAnalysis(payload);
+      setSessionId(job.session_id);
+      AsyncStorage.setItem(SESSION_KEY, job.session_id);
+      setPipelineProgress({
+        stage: job.stage,
+        detail: 'Queued for analysis.',
+        current: 0,
+        total: 7,
+      });
+
+      const result = await vigilApi.pollAnalysis(job.session_id, (status) => {
+        setPipelineProgress(toPipelineProgress(status));
       });
       onStreamResult(result);
     } catch {
       try {
-        const result = await vigilApi.analyse(payload);
+        const result = await vigilApi.analyseStream(payload, (event: StreamEvent) => {
+          if (event.type === 'progress') {
+            setPipelineProgress({
+              stage: event.stage,
+              detail: event.detail,
+              current: event.current_stage,
+              total: event.total_stages,
+            });
+          }
+        });
         onStreamResult(result);
-      } catch (error) {
-        setLastError(getErrorMessage(error));
+      } catch {
+        try {
+          const result = await vigilApi.analyse(payload);
+          onStreamResult(result);
+        } catch (error) {
+          setLastError(getErrorMessage(error));
+        }
       }
     } finally {
       setIsAnalyzing(false);

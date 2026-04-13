@@ -132,6 +132,42 @@ export type ChatResponse = {
   suggested_action?: string | null;
 };
 
+export type ChatHistoryItem = {
+  role: 'assistant' | 'user';
+  content: string;
+  timestamp: string;
+};
+
+export type SessionSnapshotResponse = {
+  session_id: string;
+  stage: string;
+  company: string;
+  analysis: AnalysisResponse | null;
+  chat_history: ChatHistoryItem[];
+  errors: string[];
+};
+
+export type AnalysisJobStartResponse = {
+  session_id: string;
+  stage: string;
+  company: string;
+  status_url: string;
+  result_url: string;
+};
+
+export type AnalysisJobStatusResponse = {
+  session_id: string;
+  stage: string;
+  company: string;
+  detail: string;
+  current_stage: number;
+  total_stages: number;
+  is_complete: boolean;
+  is_failed: boolean;
+  has_result: boolean;
+  errors: string[];
+};
+
 export type HealthResponse = {
   status: string;
   service: string;
